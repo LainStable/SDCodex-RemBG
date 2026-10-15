@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>SDCodex-RemBG AI Background Removal &amp; Replacement</title>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script>
+tailwind.config = { darkMode: "class", theme: { extend: { colors: {
+  background: "#0f131c", surface: "#0f131c", "surface-container-lowest": "#0a0e17",
+  "surface-container-low": "#181b25", "surface-container": "#1c1f29",
+  "surface-container-high": "#262a34", "surface-container-highest": "#31353f",
+  "slate-surface": "#1E293B", "slate-bg": "#0F172A",
+  "badge-checkpoint": "#6366F1", "badge-sdxl": "#06B6D4", "badge-lora": "#8B5CF6", "badge-flux": "#EC4899",
+  primary: "#c0c1ff", secondary: "#4cd7f6", tertiary: "#d0bcff",
+  "status-active": "#10B981", "status-warning": "#F59E0B", "status-alert": "#EF4444",
+  "on-surface": "#dfe2ef", "on-surface-variant": "#c7c4d7", outline: "#908fa0", "outline-variant": "#464554"
+}, fontFamily: { display: ["Geist"], body: ["Inter"], mono: ["JetBrains Mono"] } } } };
+</script>
+<style>
+.material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20; font-size: 18px; line-height: 1; display: inline-block; vertical-align: middle; }
+.scroll-thin::-webkit-scrollbar { width: 5px; height: 5px; }
+.scroll-thin::-webkit-scrollbar-track { background: #0a0e17; }
+.scroll-thin::-webkit-scrollbar-thumb { background: #31353f; border-radius: 4px; }
+.checkered-grid {
+  background-image: 
+    linear-gradient(45deg, #181b25 25%, transparent 25%), 
+    linear-gradient(-45deg, #181b25 25%, transparent 25%), 
+    linear-gradient(45deg, transparent 75%, #181b25 75%), 
+    linear-gradient(-45deg, transparent 75%, #181b25 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+  background-color: #0d111a;
+}
+.gdl-page { max-width: 100%; overflow-x: clip; }
+.gdl-page [class*="col-span"] { min-width: 0; }
+</style>
+</head>
+<body class="bg-background text-on-surface antialiased min-h-screen font-body selection:bg-badge-checkpoint/30 selection:text-white">
+<div class="gdl-page mx-auto max-w-full p-4 md:p-6 flex flex-col gap-4">
+
+  <!-- Breadcrumbs Nav -->
+  <nav class="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.06em]">
+    <span class="flex items-center gap-2 text-white font-semibold mr-2">
+      <span class="material-symbols-outlined text-badge-sdxl" style="font-variation-settings:'FILL' 1;">auto_fix_high</span>
+      SDCodex-RemBG <span class="rounded-[3px] border border-badge-checkpoint/40 bg-badge-checkpoint/15 px-1.5 py-0.5 text-primary">v1.8.0</span>
+    </span>
+    <span class="text-ink-faint">· Neural Studio &amp; Batch Matting</span>
+  </nav>
+
+  <!-- Subheader Strip -->
+  <section class="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-xl bg-surface-container-low/90 border border-outline-variant/30 shadow-sm">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-badge-checkpoint via-badge-sdxl to-badge-flux p-0.5 flex items-center justify-center shadow-md shadow-badge-checkpoint/20">
+        <div class="w-full h-full bg-surface-container-lowest rounded-[6px] flex items-center justify-center">
+          <span class="material-symbols-outlined text-badge-checkpoint text-[20px]">auto_fix_high</span>
+        </div>
+      </div>
+      <div>
+        <div class="flex items-center gap-2 font-mono">
+          <strong class="font-display text-sm text-white font-semibold">SDCodex-RemBG</strong>
+          <span class="rounded-[3px] bg-badge-checkpoint/15 text-primary border border-badge-checkpoint/40 px-1.5 py-0.2 text-[10px] font-semibold">OFFICIAL v1.8.0</span>
+          <span class="hidden sm:inline-block rounded-[3px] bg-badge-sdxl/15 text-secondary border border-badge-sdxl/40 px-1.5 py-0.2 text-[10px] font-semibold">COMFY-NODE READY</span>
+        </div>
+        <p class="font-mono text-xs text-outline hidden md:block">High-Precision Alpha Matte Extraction &amp; Generative Neural Replacement</p>
+      </div>
+    </div>
+
+    <!-- Telemetry & Action Buttons -->
+    <div class="flex flex-wrap items-center gap-2 font-mono text-[11px]">
+      <div class="flex items-center gap-1.5 px-2.5 py-1 rounded bg-surface-container-high border border-outline-variant/30">
+        <span class="w-2 h-2 rounded-full bg-status-active"></span>
+        <span class="text-outline">Engine:</span>
+        <span id="tel-engine" class="text-white font-medium">BiRefNet</span>
+      </div>
+      <div class="flex items-center gap-1.5 px-2.5 py-1 rounded bg-surface-container-high border border-outline-variant/30">
+        <span class="material-symbols-outlined text-[14px] text-badge-sdxl">memory</span>
+        <span class="text-outline">Device:</span>
+        <span id="tel-device" class="text-white font-medium">CPU</span>
+      </div>
+      <div class="flex items-center gap-1.5 ml-1">
+        <button id="btn-batch-modal" class="px-2.5 py-1 rounded-lg bg-surface-container-high hover:bg-slate-surface border border-outline-variant/40 text-white flex items-center gap-1.5 transition-all">
+          <span class="material-symbols-outlined text-[15px]">drive_folder_upload</span>
+          <span>Batch Folder</span>
+        </button>
+        <button id="btn-export-alpha" class="px-2.5 py-1 rounded-lg bg-surface-container-high hover:bg-slate-surface border border-outline-variant/40 text-white flex items-center gap-1.5 transition-all disabled:opacity-40">
+          <span class="material-symbols-outlined text-[15px]">file_download</span>
+          <span>Export (.png)</span>
+        </button>
+        <button id="btn-process-active" class="px-3 py-1 rounded-lg bg-badge-checkpoint hover:bg-badge-checkpoint/90 text-white font-semibold flex items-center gap-1.5 transition-all shadow-md shadow-badge-checkpoint/25 active:scale-[0.98]">
+          <span class="material-symbols-outlined text-[15px]">bolt</span>
+          <span>Process Active</span>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Main Studio Grid (2/3 Canvas + Queue, 1/3 Controls) -->
+  <section class="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
+    
+    <!-- LEFT 8 COLS: Canvas & Batch Queue -->
+    <div class="xl:col-span-8 flex flex-col gap-4">
+      
+      <!-- Viewport Card -->
+      <div class="rounded-xl bg-surface-container-low border border-outline-variant/30 overflow-hidden flex flex-col shadow-lg">
+        <!-- Canvas Toolbar -->
+        <div class="flex flex-wrap items-center justify-between px-3 py-2 bg-surface-container-lowest border-b border-outline-variant/30 font-mono text-[11px] gap-2">
+          <!-- View Modes -->
+          <div class="flex items-center p-0.5 rounded-lg bg-surface-container-high border border-outline-variant/40">
+            <button id="mode-split" class="px-2.5 py-1 rounded text-white bg-badge-checkpoint font-semibold transition-all">Split Wipe</button>
+            <button id="mode-alpha" class="px-2.5 py-1 rounded text-outline hover:text-white transition-all">Alpha Matte</button>
+            <button id="mode-orig" class="px-2.5 py-1 rounded text-outline hover:text-white transition-all">Original</button>
+            <button id="mode-comp" class="px-2.5 py-1 rounded text-outline hover:text-white transition-all">Composite</button>
+          </div>
+
+          <!-- Annotations & Zoom -->
+          <div class="flex items-center gap-3 text-outline">
+            <label class="flex items-center gap-1.5 cursor-pointer hover:text-white select-none">
+              <input id="chk-bbox" type="checkbox" checked class="rounded bg-surface-container border-outline-variant text-badge-checkpoint focus:ring-0 w-3.5 h-3.5 accent-[#6366f1]"/>
+              <span>B-Box Guide</span>
+            </label>
+            <div class="flex items-center gap-1">
+              <button id="btn-zoom-out" class="p-1 rounded hover:bg-surface-container-high hover:text-white" title="Zoom Out"><span class="material-symbols-outlined text-[15px]">remove</span></button>
+              <span id="zoom-level" class="px-1 text-white font-semibold text-[11px]">FIT</span>
+              <button id="btn-zoom-in" class="p-1 rounded hover:bg-surface-container-high hover:text-white" title="Zoom In"><span class="material-symbols-outlined text-[15px]">add</span></button>
+              <button id="btn-zoom-fit" class="px-1.5 py-0.5 rounded bg-surface-container-high hover:text-white text-[10px]">FIT</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Interactive Canvas Stage -->
+        <div id="canvas-stage" class="relative w-full h-[500px] checkered-grid flex items-center justify-center overflow-hidden select-none cursor-crosshair">
+          
+          <!-- Dropzone Prompt when empty -->
+          <div id="dropzone-prompt" class="absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center text-outline z-10">
+            <div class="w-14 h-14 rounded-full bg-surface-container-high flex items-center justify-center border border-outline-variant/30 text-badge-checkpoint">
+              <span class="material-symbols-outlined text-3xl">add_photo_alternate</span>
+            </div>
+            <strong class="text-white text-sm font-semibold">Drop image here or choose file</strong>
+            <p class="font-mono text-xs max-w-sm text-ink-muted">Supports PNG, WebP, JPG up to 8K resolution. Process with BiRefNet or U2Net.</p>
+            <button id="btn-browse-file" class="mt-2 px-3 py-1.5 rounded-lg bg-badge-checkpoint/20 hover:bg-badge-checkpoint/30 border border-badge-checkpoint text-primary font-mono text-xs font-semibold">
+              Browse Image File
+            </button>
+            <input id="file-input" type="file" accept="image/*" class="hidden"/>
+          </div>
+
+          <!-- Original Background Image Layer -->
+          <div id="layer-original" class="hidden absolute inset-0 w-full h-full flex items-center justify-center p-2">
+            <img id="img-original" class="max-h-full max-w-full object-contain pointer-events-none" src="" alt="Original"/>
+          </div>
+
+          <!-- Processed Cutout Foreground Layer with Split Wipe polygon clip -->
+          <div id="layer-cutout" class="hidden absolute inset-0 w-full h-full flex items-center justify-center p-2 pointer-events-none">
+            <div id="wipe-container" class="relative max-h-full max-w-full h-full w-full flex items-center justify-center overflow-hidden">
+              <img id="img-cutout" class="max-h-full max-w-full object-contain pointer-events-none drop-shadow-[0_10px_30px_rgba(99,102,241,0.35)]" src="" alt="Cutout"/>
+            </div>
+          </div>
+
+          <!-- Alpha Mask Layer (when in Alpha Matte mode) -->
+          <div id="layer-mask" class="hidden absolute inset-0 w-full h-full flex items-center justify-center p-2 pointer-events-none">
+            <img id="img-mask" class="max-h-full max-w-full object-contain pointer-events-none" src="" alt="Alpha Mask"/>
+          </div>
+
+          <!-- Bounding Box Annotation Overlay -->
+          <div id="bbox-overlay" class="hidden absolute inset-x-20 inset-y-12 border border-dashed border-badge-sdxl/60 pointer-events-none rounded">
+            <div class="absolute -top-2.5 left-4 px-1.5 py-0.2 rounded bg-surface-container-lowest border border-badge-sdxl/50 text-[9px] font-mono text-badge-sdxl">
+              TARGET DETECTED [CONF: 99.4%]
+            </div>
+            <div class="absolute top-0 left-0 w-2 h-2 border-t-2 border-l-2 border-badge-sdxl"></div>
+            <div class="absolute top-0 right-0 w-2 h-2 border-t-2 border-r-2 border-badge-sdxl"></div>
+            <div class="absolute bottom-0 left-0 w-2 h-2 border-b-2 border-l-2 border-badge-sdxl"></div>
+            <div class="absolute bottom-0 right-0 w-2 h-2 border-b-2 border-r-2 border-badge-sdxl"></div>
+          </div>
+
+          <!-- Split View Divider Handle -->
+          <div id="divider-bar" class="hidden absolute top-0 bottom-0 left-[50%] w-0.5 bg-white shadow-[0_0_12px_rgba(255,255,255,0.8)] z-30 cursor-ew-resize flex items-center justify-center">
+            <div class="w-6 h-6 rounded-full bg-slate-surface border-2 border-white flex items-center justify-center shadow-xl text-white">
+              <span class="material-symbols-outlined text-[13px]" style="transform: rotate(90deg);">unfold_more</span>
+            </div>
+          </div>
+
+          <!-- Bottom Indicators in Canvas -->
+          <div id="chip-left" class="hidden absolute bottom-3 left-4 px-2 py-0.5 rounded bg-surface-container-lowest/80 backdrop-blur border border-outline-variant/40 font-mono text-[10px] text-status-active flex items-center gap-1 z-20">
+            <span class="w-1.5 h-1.5 rounded-full bg-status-active"></span>
+            <span>ALPHA CUTOUT</span>
+          </div>
+          <div id="chip-right" class="hidden absolute bottom-3 right-4 px-2 py-0.5 rounded bg-surface-container-lowest/80 backdrop-blur border border-outline-variant/40 font-mono text-[10px] text-outline flex items-center gap-1 z-20">
+            <span>ORIGINAL RAW</span>
+          </div>
+        </div>
+
+        <!-- Canvas Bottom Telemetry Status Bar -->
+        <div class="flex flex-wrap items-center justify-between px-3 py-2 bg-surface-container-lowest border-t border-outline-variant/30 font-mono text-[11px] text-outline">
+          <div class="flex items-center gap-3">
+            <span>Dims: <strong id="stat-dims" class="text-white">-- × --</strong></span>
+            <span>Depth: <strong id="stat-depth" class="text-white">32-bit RGBA</strong></span>
+            <span>Inference: <strong id="stat-time" class="text-badge-sdxl">-- ms</strong></span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span id="stat-defringe" class="text-outline">Edge Defringe: <strong class="text-badge-flux">ON</strong></span>
+            <span class="text-outline-variant">•</span>
+            <span id="stat-ready" class="text-badge-checkpoint">Studio Ready</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Batch Workspace Queue -->
+      <div class="rounded-xl bg-surface-container-low border border-outline-variant/30 p-4 flex flex-col gap-2 shadow-sm">
+        <div class="flex items-center justify-between font-mono text-xs">
+          <div class="flex items-center gap-2">
+            <span class="material-symbols-outlined text-outline text-[18px]">view_carousel</span>
+            <span class="font-semibold text-white uppercase tracking-wider text-[11px]">Batch Workspace Queue</span>
+            <span id="queue-count-badge" class="bg-surface-container-high px-1.5 py-0.2 rounded text-[10px] text-outline">0 Items</span>
+          </div>
+          <div class="flex items-center gap-2 text-[11px]">
+            <button id="btn-queue-refresh" class="text-primary hover:underline">Reload Input Dir</button>
+            <span class="text-outline-variant">•</span>
+            <button id="btn-queue-clear" class="text-status-alert hover:underline">Clear</button>
+          </div>
+        </div>
+
+        <div id="queue-strip" class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-2 mt-1">
+          <!-- Add Image Tile -->
+          <div id="btn-queue-add" class="rounded-lg border-2 border-dashed border-outline-variant/40 hover:border-badge-checkpoint/60 bg-surface-container-lowest/50 p-2 flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors text-outline hover:text-white h-24">
+            <span class="material-symbols-outlined text-[20px]">add_photo_alternate</span>
+            <span class="text-[9px] font-mono uppercase text-center leading-tight">Drop / Add Images</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT 4 COLS: Configuration & Compositing Panel -->
+    <div class="xl:col-span-4 flex flex-col gap-4 font-mono text-xs">
+      <div class="rounded-xl bg-surface-container-low border border-outline-variant/30 p-4 flex flex-col gap-4 shadow-lg">
+        
+        <!-- SECTION 1: INFERENCE MODEL -->
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="uppercase tracking-wider font-semibold text-white text-[11px] flex items-center gap-1.5">
+              <span class="material-symbols-outlined text-badge-checkpoint text-[16px]">psychology</span>
+              Inference Model
+            </label>
+            <span class="text-[10px] text-status-active">ONNX Runtime</span>
+          </div>
+          <select id="select-model" class="w-full px-3 py-2 rounded-lg bg-surface-container-lowest border border-outline-variant/40 text-white text-xs focus:outline-none focus:border-badge-checkpoint">
+            <option value="birefnet-general" selected>BiRefNet General (Recommended for complex limbs)</option>
+            <option value="birefnet-portrait">BiRefNet Portrait (Fine strand alpha matting)</option>
+            <option value="u2net">U2Net Ultra Fast (Low latency)</option>
+            <option value="isnet-general-use">IS-Net / DIS (High edge sharpness)</option>
+            <option value="silueta">Silueta (Compact / lightweight)</option>
+          </select>
+        </div>
+
+        <!-- SECTION 2: TARGET MODE TABS -->
+        <div>
+          <label class="uppercase tracking-wider font-semibold text-white text-[11px] block mb-1">
+            Execution Target Mode
+          </label>
+          <div class="grid grid-cols-2 gap-1 p-1 rounded-lg bg-surface-container-lowest border border-outline-variant/30 text-[11px]">
+            <button id="target-transparent" class="py-1.5 px-2 rounded bg-badge-checkpoint/20 text-badge-checkpoint border border-badge-checkpoint/40 font-semibold flex items-center justify-center gap-1">
+              <span class="material-symbols-outlined text-[14px]">grid_view</span>
+              Transparent PNG
+            </button>
+            <button id="target-color" class="py-1.5 px-2 rounded text-outline hover:text-white flex items-center justify-center gap-1">
+              <span class="material-symbols-outlined text-[14px]">palette</span>
+              Color Fill
+            </button>
+            <button id="target-composite" class="py-1.5 px-2 rounded text-outline hover:text-white flex items-center justify-center gap-1">
+              <span class="material-symbols-outlined text-[14px]">layers</span>
+              Composite
+            </button>
+            <button id="target-mask" class="py-1.5 px-2 rounded text-outline hover:text-white flex items-center justify-center gap-1">
+              <span class="material-symbols-outlined text-[14px]">contrast</span>
+              Alpha Mask
+            </button>
+          </div>
+        </div>
+
+        <!-- SECTION 3: BACKGROUND CUSTOMIZER -->
+        <div id="bg-customizer-box" class="space-y-3 p-3 rounded-lg bg-surface-container-lowest/60 border border-outline-variant/30">
+          <div class="flex items-center justify-between text-[11px]">
+            <span class="uppercase tracking-wider text-white font-semibold">Background Customizer</span>
+            <span class="text-badge-sdxl">Layer 0</span>
+          </div>
+
+          <!-- Color Swatches -->
+          <div>
+            <span class="text-[10px] text-outline block mb-1">Color Fill Swatches</span>
+            <div class="flex items-center gap-1.5">
+              <button class="color-swatch w-6 h-6 rounded bg-black border border-white/20 hover:scale-105" data-color="#000000" title="Pure Black"></button>
+              <button class="color-swatch w-6 h-6 rounded bg-white border border-white/20 hover:scale-105" data-color="#FFFFFF" title="Pure White"></button>
+              <button class="color-swatch w-6 h-6 rounded bg-[#0F131C] ring-2 ring-badge-checkpoint hover:scale-105" data-color="#0F131C" title="Cyberpunk Slate #0F131C"></button>
+              <button class="color-swatch w-6 h-6 rounded bg-[#06B6D4] border border-white/20 hover:scale-105" data-color="#06B6D4" title="Studio Cyan"></button>
+              <button class="color-swatch w-6 h-6 rounded bg-[#8B5CF6] border border-white/20 hover:scale-105" data-color="#8B5CF6" title="Neon Violet"></button>
+              <input id="input-hex" type="text" value="#0F131C" class="flex-1 py-0.5 px-2 text-[11px] bg-surface-container-high border border-outline-variant/40 rounded text-white uppercase focus:outline-none focus:border-badge-checkpoint"/>
+            </div>
+          </div>
+        </div>
+
+        <!-- SECTION 4: MATTE FINE TUNING -->
+        <div class="space-y-2.5">
+          <span class="uppercase tracking-wider font-semibold text-white text-[11px] block">Matte Fine Tuning</span>
+          
+          <!-- Threshold -->
+          <div>
+            <div class="flex justify-between items-center text-[11px] mb-1">
+              <span class="text-outline">Alpha Threshold</span>
+              <span id="val-thresh" class="text-white font-semibold">0.85</span>
+            </div>
+            <input id="range-thresh" type="range" min="0.1" max="1.0" step="0.01" value="0.85" class="w-full accent-badge-checkpoint h-1.5 bg-surface-container-lowest rounded-lg cursor-pointer"/>
+          </div>
+
+          <!-- Edge Erosion / Expansion -->
+          <div>
+            <div class="flex justify-between items-center text-[11px] mb-1">
+              <span class="text-outline">Edge Erosion / Expansion</span>
+              <span id="val-erosion" class="text-white font-semibold">-0.5 px</span>
+            </div>
+            <input id="range-erosion" type="range" min="-5" max="5" step="0.5" value="-0.5" class="w-full accent-badge-checkpoint h-1.5 bg-surface-container-lowest rounded-lg cursor-pointer"/>
+          </div>
+
+          <!-- Feather Radius -->
+          <div>
+            <div class="flex justify-between items-center text-[11px] mb-1">
+              <span class="text-outline">Feather Radius</span>
+              <span id="val-feather" class="text-white font-semibold">1.5 px</span>
+            </div>
+            <input id="range-feather" type="range" min="0" max="10" step="0.5" value="1.5" class="w-full accent-badge-checkpoint h-1.5 bg-surface-container-lowest rounded-lg cursor-pointer"/>
+          </div>
+
+          <!-- Despill Color Defringe -->
+          <div class="flex items-center justify-between pt-1">
+            <span class="text-outline text-[11px]">Despill Color Defringe</span>
+            <input id="chk-despill" type="checkbox" checked class="rounded border-outline-variant bg-surface-container text-badge-checkpoint focus:ring-0 w-4 h-4 accent-[#6366f1]"/>
+          </div>
+        </div>
+
+        <!-- SECTION 5: PIPELINE OUTPUT -->
+        <div class="p-3.5 rounded-xl bg-surface-container-lowest border border-outline-variant/30 space-y-3">
+          <span class="text-[10px] text-outline uppercase tracking-wider block font-semibold">Output Pipeline</span>
+          
+          <div>
+            <span class="text-[10px] text-outline block mb-1">Destination Directory</span>
+            <input id="out-dest-dir" type="text" readonly class="w-full py-1 px-2 rounded bg-surface-container-high border border-outline-variant/30 text-[11px] text-white truncate" value="/data/rembg_output"/>
+          </div>
+
+          <div>
+            <span class="text-[10px] text-outline block mb-1">Encoding Format</span>
+            <div class="grid grid-cols-3 gap-1 text-[10px]">
+              <button id="fmt-png" class="py-1 rounded bg-badge-checkpoint/20 text-badge-checkpoint border border-badge-checkpoint/40 font-semibold text-center">.png RGBA</button>
+              <button id="fmt-webp" class="py-1 rounded bg-surface-container-high text-outline hover:text-white text-center">.webp</button>
+              <button id="fmt-mask" class="py-1 rounded bg-surface-container-high text-outline hover:text-white text-center">mask only</button>
+            </div>
+          </div>
+
+          <div class="pt-1">
+            <button id="btn-commit-batch" class="w-full py-2.5 rounded-lg bg-gradient-to-r from-badge-checkpoint to-badge-sdxl hover:opacity-95 text-white font-semibold flex items-center justify-center gap-2 shadow-lg shadow-badge-checkpoint/20 active:scale-[0.98] transition-all">
+              <span class="material-symbols-outlined text-[17px]">save_alt</span>
+              <span>Process All in Queue</span>
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+(function() {
+  let currentFile = null;
+  let currentCutoutUrl = null;
+  let currentOrigUrl = null;
+  let currentMaskUrl = null;
+  let currentFormat = 'png';
+  let currentTargetMode = 'transparent';
+  let isWiping = false;
+  let wipePct = 50;
+
+  const dom = {
+    telEngine: document.getElementById('tel-engine'),
+    telDevice: document.getElementById('tel-device'),
+    selectModel: document.getElementById('select-model'),
+    fileInput: document.getElementById('file-input'),
+    btnBrowse: document.getElementById('btn-browse-file'),
+    dropPrompt: document.getElementById('dropzone-prompt'),
+    stage: document.getElementById('canvas-stage'),
+    layerOrig: document.getElementById('layer-original'),
+    imgOrig: document.getElementById('img-original'),
+    layerCutout: document.getElementById('layer-cutout'),
+    imgCutout: document.getElementById('img-cutout'),
+    wipeContainer: document.getElementById('wipe-container'),
+    layerMask: document.getElementById('layer-mask'),
+    imgMask: document.getElementById('img-mask'),
+    divider: document.getElementById('divider-bar'),
+    bbox: document.getElementById('bbox-overlay'),
+    chkBbox: document.getElementById('chk-bbox'),
+    chipLeft: document.getElementById('chip-left'),
+    chipRight: document.getElementById('chip-right'),
+    statDims: document.getElementById('stat-dims'),
+    statTime: document.getElementById('stat-time'),
+    statReady: document.getElementById('stat-ready'),
+    btnProcessActive: document.getElementById('btn-process-active'),
+    btnExportAlpha: document.getElementById('btn-export-alpha'),
+    modeSplit: document.getElementById('mode-split'),
+    modeAlpha: document.getElementById('mode-alpha'),
+    modeOrig: document.getElementById('mode-orig'),
+    modeComp: document.getElementById('mode-comp'),
+    targetTrans: document.getElementById('target-transparent'),
+    targetColor: document.getElementById('target-color'),
+    targetComp: document.getElementById('target-composite'),
+    targetMask: document.getElementById('target-mask'),
+    inputHex: document.getElementById('input-hex'),
+    rangeThresh: document.getElementById('range-thresh'),
+    valThresh: document.getElementById('val-thresh'),
+    rangeErosion: document.getElementById('range-erosion'),
+    valErosion: document.getElementById('val-erosion'),
+    rangeFeather: document.getElementById('range-feather'),
+    valFeather: document.getElementById('val-feather'),
+    chkDespill: document.getElementById('chk-despill'),
+    outDestDir: document.getElementById('out-dest-dir'),
+    fmtPng: document.getElementById('fmt-png'),
+    fmtWebp: document.getElementById('fmt-webp'),
+    fmtMask: document.getElementById('fmt-mask'),
+    btnCommitBatch: document.getElementById('btn-commit-batch'),
+    queueStrip: document.getElementById('queue-strip'),
+    queueBadge: document.getElementById('queue-count-badge'),
+    btnQueueRefresh: document.getElementById('btn-queue-refresh'),
+    btnQueueClear: document.getElementById('btn-queue-clear'),
+    btnQueueAdd: document.getElementById('btn-queue-add'),
+    btnZoomIn: document.getElementById('btn-zoom-in'),
+    btnZoomOut: document.getElementById('btn-zoom-out'),
+    btnZoomFit: document.getElementById('btn-zoom-fit'),
+    zoomLevel: document.getElementById('zoom-level'),
+  };
+
+  async function loadStatus() {
+    try {
+      const res = await fetch('/rembg/api/status');
+      if (!res.ok) return;
+      const d = await res.json();
+      dom.telEngine.textContent = 'BiRefNet / U2Net';
+      dom.telDevice.textContent = d.device || 'CPU';
+      if (d.output_dir) dom.outDestDir.value = d.output_dir;
+    } catch(e) {
+      console.error(e);
+    }
+  }
+
+  async function loadQueue() {
+    try {
+      const res = await fetch('/rembg/api/queue');
+      if (!res.ok) return;
+      const d = await res.json();
+      const items = d.items || [];
+      dom.queueBadge.textContent = `${items.length} Items`;
+
+      // Render items in queue strip, keeping the Add button at end
+      dom.queueStrip.querySelectorAll('.queue-item-card').forEach(el => el.remove());
+      items.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'queue-item-card group relative rounded-lg border border-outline-variant/40 bg-surface-container-lowest p-1.5 flex flex-col gap-1 cursor-pointer hover:border-badge-checkpoint transition-all';
+        div.innerHTML = `
+          <div class="h-16 w-full rounded overflow-hidden checkered-grid relative flex items-center justify-center">
+            <span class="material-symbols-outlined text-outline text-xl">image</span>
+          </div>
+          <div class="flex justify-between items-center text-[10px] font-mono">
+            <span class="text-white truncate">${escapeHtml(item.name)}</span>
+          </div>
+        `;
+        div.addEventListener('click', () => {
+          loadDiskImage(item.path);
+        });
+        dom.queueStrip.insertBefore(div, dom.btnQueueAdd);
+      });
+    } catch(e) {
+      console.error(e);
+    }
+  }
+
+  function handleFileSelect(file) {
+    if (!file) return;
+    currentFile = file;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      currentOrigUrl = e.target.result;
+      dom.imgOrig.src = currentOrigUrl;
+      dom.imgCutout.src = '';
+      dom.imgMask.src = '';
+      currentCutoutUrl = null;
+      currentMaskUrl = null;
+
+      dom.dropPrompt.classList.add('hidden');
+      dom.layerOrig.classList.remove('hidden');
+      dom.layerCutout.classList.remove('hidden');
+      dom.divider.classList.remove('hidden');
+      dom.chipLeft.classList.remove('hidden');
+      dom.chipRight.classList.remove('hidden');
+
+      setWipePosition(50);
+      dom.statReady.textContent = 'Image Loaded · Ready to Process';
+      dom.statReady.className = 'text-status-warning';
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function loadDiskImage(path) {
+    dom.statReady.textContent = 'Loading from disk...';
+    try {
+      const res = await fetch(`/rembg/api/file/${encodeURIComponent(path)}`);
+      if (!res.ok) throw new Error('File fetch failed');
+      const blob = await res.blob();
+      handleFileSelect(new File([blob], path.split('/').pop()));
+    } catch(e) {
+      alert('Failed to load file: ' + e.message);
+    }
+  }
+
+  async function processActiveImage() {
+    if (!currentOrigUrl) {
+      alert('Please select or upload an image first.');
+      return;
+    }
+
+    dom.btnProcessActive.disabled = true;
+    dom.btnProcessActive.classList.add('opacity-50');
+    dom.statReady.textContent = 'Running Neural Inference...';
+    dom.statReady.className = 'text-badge-sdxl animate-pulse';
+
+    const payload = {
+      image: currentOrigUrl,
+      model: dom.selectModel.value,
+      target_mode: currentTargetMode,
+      bgcolor: dom.inputHex.value,
+      format: currentFormat,
+      threshold: parseFloat(dom.rangeThresh.value),
+      erosion: parseFloat(dom.rangeErosion.value),
+      feather: parseFloat(dom.rangeFeather.value),
+      despill: dom.chkDespill.checked,
+      save: true,
+    };
+
+    try {
+      const res = await fetch('/rembg/api/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Processing failed');
+
+      currentCutoutUrl = data.image;
+      currentMaskUrl = data.mask;
+
+      dom.imgCutout.src = currentCutoutUrl;
+      dom.imgMask.src = currentMaskUrl;
+
+      dom.statDims.textContent = `${data.width} × ${data.height} px`;
+      dom.statTime.textContent = `${data.inference_ms} ms`;
+      dom.statReady.textContent = 'Alpha Matte Extracted';
+      dom.statReady.className = 'text-status-active font-semibold';
+      dom.btnExportAlpha.disabled = false;
+
+      if (dom.chkBbox.checked) {
+        dom.bbox.classList.remove('hidden');
+      }
+
+      setMode('split');
+    } catch(e) {
+      alert('Error during background removal: ' + e.message);
+      dom.statReady.textContent = 'Error: ' + e.message;
+      dom.statReady.className = 'text-status-alert';
+    } finally {
+      dom.btnProcessActive.disabled = false;
+      dom.btnProcessActive.classList.remove('opacity-50');
+    }
+  }
+
+  function setWipePosition(pct) {
+    wipePct = Math.max(0, Math.min(100, pct));
+    dom.divider.style.left = `${wipePct}%`;
+    dom.wipeContainer.style.clipPath = `polygon(0 0, ${wipePct}% 0, ${wipePct}% 100%, 0 100%)`;
+  }
+
+  function setMode(mode) {
+    [dom.modeSplit, dom.modeAlpha, dom.modeOrig, dom.modeComp].forEach(b => {
+      b.className = 'px-2.5 py-1 rounded text-outline hover:text-white transition-all';
+    });
+
+    dom.layerOrig.classList.add('hidden');
+    dom.layerCutout.classList.add('hidden');
+    dom.layerMask.classList.add('hidden');
+    dom.divider.classList.add('hidden');
+    dom.chipLeft.classList.add('hidden');
+    dom.chipRight.classList.add('hidden');
+
+    if (mode === 'split') {
+      dom.modeSplit.className = 'px-2.5 py-1 rounded text-white bg-badge-checkpoint font-semibold transition-all';
+      dom.layerOrig.classList.remove('hidden');
+      dom.layerCutout.classList.remove('hidden');
+      dom.divider.classList.remove('hidden');
+      dom.chipLeft.classList.remove('hidden');
+      dom.chipRight.classList.remove('hidden');
+      setWipePosition(wipePct);
+    } else if (mode === 'alpha') {
+      dom.modeAlpha.className = 'px-2.5 py-1 rounded text-white bg-badge-checkpoint font-semibold transition-all';
+      dom.layerMask.classList.remove('hidden');
+    } else if (mode === 'orig') {
+      dom.modeOrig.className = 'px-2.5 py-1 rounded text-white bg-badge-checkpoint font-semibold transition-all';
+      dom.layerOrig.classList.remove('hidden');
+    } else if (mode === 'comp') {
+      dom.modeComp.className = 'px-2.5 py-1 rounded text-white bg-badge-checkpoint font-semibold transition-all';
+      dom.layerCutout.classList.remove('hidden');
+      dom.wipeContainer.style.clipPath = 'none';
+    }
+  }
+
+  // Divider dragging
+  dom.divider.addEventListener('mousedown', (e) => {
+    isWiping = true;
+    e.preventDefault();
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!isWiping) return;
+    const rect = dom.stage.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const pct = (x / rect.width) * 100;
+    setWipePosition(pct);
+  });
+
+  window.addEventListener('mouseup', () => {
+    isWiping = false;
+  });
+
+  // Target Mode selection
+  function setTargetMode(mode) {
+    currentTargetMode = mode;
+    [dom.targetTrans, dom.targetColor, dom.targetComp, dom.targetMask].forEach(b => {
+      b.className = 'py-1.5 px-2 rounded text-outline hover:text-white flex items-center justify-center gap-1';
+    });
+
+    if (mode === 'transparent') {
+      dom.targetTrans.className = 'py-1.5 px-2 rounded bg-badge-checkpoint/20 text-badge-checkpoint border border-badge-checkpoint/40 font-semibold flex items-center justify-center gap-1';
+    } else if (mode === 'color') {
+      dom.targetColor.className = 'py-1.5 px-2 rounded bg-badge-checkpoint/20 text-badge-checkpoint border border-badge-checkpoint/40 font-semibold flex items-center justify-center gap-1';
+    } else if (mode === 'composite') {
+      dom.targetComp.className = 'py-1.5 px-2 rounded bg-badge-checkpoint/20 text-badge-checkpoint border border-badge-checkpoint/40 font-semibold flex items-center justify-center gap-1';
+    } else if (mode === 'mask') {
+      dom.targetMask.className = 'py-1.5 px-2 rounded bg-badge-checkpoint/20 text-badge-checkpoint border border-badge-checkpoint/40 font-semibold flex items-center justify-center gap-1';
+    }
+  }
+
+  // Format selection
+  function setFormat(fmt) {
+    currentFormat = fmt;
+    [dom.fmtPng, dom.fmtWebp, dom.fmtMask].forEach(b => {
+      b.className = 'py-1 rounded bg-surface-container-high text-outline hover:text-white text-center';
+    });
+    if (fmt === 'png') {
+      dom.fmtPng.className = 'py-1 rounded bg-badge-checkpoint/20 text-badge-checkpoint border border-badge-checkpoint/40 font-semibold text-center';
+    } else if (fmt === 'webp') {
+      dom.fmtWebp.className = 'py-1 rounded bg-badge-checkpoint/20 text-badge-checkpoint border border-badge-checkpoint/40 font-semibold text-center';
+    } else if (fmt === 'mask') {
+      dom.fmtMask.className = 'py-1 rounded bg-badge-checkpoint/20 text-badge-checkpoint border border-badge-checkpoint/40 font-semibold text-center';
+    }
+  }
+
+  // Event Listeners
+  dom.btnBrowse.addEventListener('click', () => dom.fileInput.click());
+  dom.btnQueueAdd.addEventListener('click', () => dom.fileInput.click());
+  dom.fileInput.addEventListener('change', (e) => {
+    if (e.target.files && e.target.files[0]) {
+      handleFileSelect(e.target.files[0]);
+    }
+  });
+
+  // Drag and drop onto stage
+  dom.stage.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dom.stage.classList.add('ring-2', 'ring-badge-checkpoint');
+  });
+  dom.stage.addEventListener('dragleave', () => {
+    dom.stage.classList.remove('ring-2', 'ring-badge-checkpoint');
+  });
+  dom.stage.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dom.stage.classList.remove('ring-2', 'ring-badge-checkpoint');
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleFileSelect(e.dataTransfer.files[0]);
+    }
+  });
+
+  dom.btnProcessActive.addEventListener('click', processActiveImage);
+
+  dom.btnExportAlpha.addEventListener('click', () => {
+    if (!currentCutoutUrl) return;
+    const a = document.createElement('a');
+    a.href = currentCutoutUrl;
+    a.download = `cutout_${Date.now()}.${currentFormat}`;
+    a.click();
+  });
+
+  // Sliders
+  dom.rangeThresh.addEventListener('input', (e) => {
+    dom.valThresh.textContent = e.target.value;
+  });
+  dom.rangeErosion.addEventListener('input', (e) => {
+    dom.valErosion.textContent = `${e.target.value} px`;
+  });
+  dom.rangeFeather.addEventListener('input', (e) => {
+    dom.valFeather.textContent = `${e.target.value} px`;
+  });
+
+  // Swatches
+  document.querySelectorAll('.color-swatch').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const col = btn.getAttribute('data-color');
+      dom.inputHex.value = col;
+      document.querySelectorAll('.color-swatch').forEach(b => b.classList.remove('ring-2', 'ring-badge-checkpoint'));
+      btn.classList.add('ring-2', 'ring-badge-checkpoint');
+    });
+  });
+
+  // Mode Switches
+  dom.modeSplit.addEventListener('click', () => setMode('split'));
+  dom.modeAlpha.addEventListener('click', () => setMode('alpha'));
+  dom.modeOrig.addEventListener('click', () => setMode('orig'));
+  dom.modeComp.addEventListener('click', () => setMode('comp'));
+
+  dom.targetTrans.addEventListener('click', () => setTargetMode('transparent'));
+  dom.targetColor.addEventListener('click', () => setTargetMode('color'));
+  dom.targetComp.addEventListener('click', () => setTargetMode('composite'));
+  dom.targetMask.addEventListener('click', () => setTargetMode('mask'));
+
+  dom.fmtPng.addEventListener('click', () => setFormat('png'));
+  dom.fmtWebp.addEventListener('click', () => setFormat('webp'));
+  dom.fmtMask.addEventListener('click', () => setFormat('mask'));
+
+  dom.chkBbox.addEventListener('change', (e) => {
+    if (e.target.checked && currentCutoutUrl) {
+      dom.bbox.classList.remove('hidden');
+    } else {
+      dom.bbox.classList.add('hidden');
+    }
+  });
+
+  // Batch commit
+  dom.btnCommitBatch.addEventListener('click', async () => {
+    if (!confirm('Start batch background removal on all images in the input folder?')) return;
+    dom.btnCommitBatch.disabled = true;
+    try {
+      const res = await fetch('/rembg/api/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: dom.selectModel.value,
+          target_mode: currentTargetMode,
+          bgcolor: dom.inputHex.value,
+        }),
+      });
+      const d = await res.json();
+      if (d.ok) {
+        alert(`Batch job started for ${d.total} items. Output will be saved to ${dom.outDestDir.value}`);
+      } else {
+        alert(d.error || 'Failed to start batch');
+      }
+    } catch(e) {
+      alert('Error: ' + e.message);
+    } finally {
+      dom.btnCommitBatch.disabled = false;
+    }
+  });
+
+  dom.btnQueueRefresh.addEventListener('click', loadQueue);
+  dom.btnQueueClear.addEventListener('click', () => {
+    dom.queueStrip.querySelectorAll('.queue-item-card').forEach(el => el.remove());
+    dom.queueBadge.textContent = '0 Items';
+  });
+
+  function escapeHtml(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // Initialize
+  loadStatus();
+  loadQueue();
+})();
+</script>
+</body>
+</html>

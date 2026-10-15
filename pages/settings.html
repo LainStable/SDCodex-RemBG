@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>RemBG Settings · SDCodex</title>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script>
+tailwind.config = { darkMode: "class", theme: { extend: { colors: {
+  background: "#0f131c", surface: "#0f131c", "surface-container-lowest": "#0a0e17",
+  "surface-container-low": "#181b25", "surface-container": "#1c1f29",
+  "surface-container-high": "#262a34", "surface-container-highest": "#31353f",
+  "slate-surface": "#1E293B", "slate-bg": "#0F172A",
+  "badge-checkpoint": "#6366F1", "badge-sdxl": "#06B6D4", "badge-lora": "#8B5CF6", "badge-flux": "#EC4899",
+  primary: "#c0c1ff", secondary: "#4cd7f6", tertiary: "#d0bcff",
+  "status-active": "#10B981", "status-warning": "#F59E0B", "status-alert": "#EF4444",
+  "on-surface": "#dfe2ef", "on-surface-variant": "#c7c4d7", outline: "#908fa0", "outline-variant": "#464554"
+}, fontFamily: { display: ["Geist"], body: ["Inter"], mono: ["JetBrains Mono"] } } } };
+</script>
+<style>
+.material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20; font-size: 18px; line-height: 1; display: inline-block; vertical-align: middle; }
+</style>
+</head>
+<body class="bg-background text-on-surface antialiased p-4 md:p-6 font-body">
+<div class="mx-auto max-w-3xl flex flex-col gap-6">
+
+  <nav class="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.06em]">
+    <span class="flex items-center gap-2 text-white font-semibold mr-2">
+      <span class="material-symbols-outlined text-badge-sdxl">tune</span>
+      SDCodex-RemBG Settings
+    </span>
+    <span class="text-ink-faint">· Neural Engine &amp; Output Configuration</span>
+  </nav>
+
+  <div class="rounded-xl border border-outline-variant/30 bg-surface-container-low p-5 flex flex-col gap-5 shadow-sm">
+    <div class="flex items-center justify-between border-b border-outline-variant/20 pb-3">
+      <div>
+        <h2 class="font-display font-semibold text-white text-base">Pipeline &amp; Directory Paths</h2>
+        <p class="font-mono text-xs text-outline mt-0.5">Where RemBG reads source images and saves clean alpha cutouts.</p>
+      </div>
+      <span class="rounded bg-badge-checkpoint/20 text-badge-checkpoint border border-badge-checkpoint/30 px-2 py-0.5 font-mono text-[10px]">VOLUMES</span>
+    </div>
+
+    <div class="space-y-4 font-mono text-xs">
+      <div>
+        <label class="text-[10px] uppercase text-outline block mb-1">Source Input Directory (REMBG_INPUT)</label>
+        <input id="cfg-input-dir" type="text" class="w-full rounded-lg border border-outline-variant/40 bg-surface-container-lowest px-3 py-2 text-white focus:outline-none focus:border-badge-checkpoint" readonly/>
+        <p class="text-[10px] text-outline mt-1">Directory scanned for images in the studio batch queue.</p>
+      </div>
+
+      <div>
+        <label class="text-[10px] uppercase text-outline block mb-1">Output Cutouts Directory (REMBG_OUTPUT)</label>
+        <input id="cfg-output-dir" type="text" class="w-full rounded-lg border border-outline-variant/40 bg-surface-container-lowest px-3 py-2 text-white focus:outline-none focus:border-badge-checkpoint" readonly/>
+        <p class="text-[10px] text-outline mt-1">Where transparent cutouts, alpha masks, and composited results land.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="rounded-xl border border-outline-variant/30 bg-surface-container-low p-5 flex flex-col gap-4 shadow-sm">
+    <div class="border-b border-outline-variant/20 pb-3">
+      <h2 class="font-display font-semibold text-white text-base">Inference Engine Telemetry</h2>
+      <p class="font-mono text-xs text-outline mt-0.5">Execution provider and neural hardware status.</p>
+    </div>
+
+    <div class="grid grid-cols-2 gap-3 font-mono text-xs">
+      <div class="p-3 rounded-lg border border-outline-variant/20 bg-surface-container-lowest">
+        <span class="text-outline text-[10px] uppercase block mb-1">Inference Device</span>
+        <span id="cfg-device" class="text-white font-semibold flex items-center gap-1.5">
+          <span class="material-symbols-outlined text-badge-sdxl text-[16px]">memory</span>
+          <span>Detecting...</span>
+        </span>
+      </div>
+      <div class="p-3 rounded-lg border border-outline-variant/20 bg-surface-container-lowest">
+        <span class="text-outline text-[10px] uppercase block mb-1">Engine Backend</span>
+        <span class="text-status-active font-semibold flex items-center gap-1">
+          <span class="w-2 h-2 rounded-full bg-status-active"></span> ONNX Runtime + BiRefNet
+        </span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(async function() {
+  try {
+    const res = await fetch('/rembg/api/status');
+    if (res.ok) {
+      const d = await res.json();
+      document.getElementById('cfg-input-dir').value = d.input_dir || '';
+      document.getElementById('cfg-output-dir').value = d.output_dir || '';
+      document.getElementById('cfg-device').textContent = d.device || 'CPU';
+    }
+  } catch(e) {
+    console.error(e);
+  }
+})();
+</script>
+</body>
+</html>

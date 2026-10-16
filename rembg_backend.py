@@ -20,6 +20,8 @@ IMAGE_EXTENSIONS = {
 }
 
 _sessions = {}
+_session_errors = {}
+_model_cache_warning = ""
 _session_lock = threading.Lock()
 
 # Batch state
@@ -69,11 +71,18 @@ def get_output_dir():
 
 def get_model_cache_dir():
     """Use the plugin's persistent model volume for ONNX model weights."""
+    global _model_cache_warning
+    _model_cache_warning = ""
     cache_dir = os.environ.get("U2NET_HOME") or os.environ.get("HFH") or "/data/huggingface"
     cache_dir = os.path.abspath(os.path.expanduser(cache_dir))
-    os.makedirs(cache_dir, exist_ok=True)
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+    except OSError as exc:
+        _model_cache_warning = f"Could not use configured model cache {cache_dir}: {exc}"
+        cache_dir = os.path.abspath(os.path.expanduser("~/.u2net"))
+        os.makedirs(cache_dir, exist_ok=True)
     # rembg checks this variable when it initializes a session.
-    os.environ.setdefault("U2NET_HOME", cache_dir)
+    os.environ["U2NET_HOME"] = cache_dir
     return cache_dir
 
 
@@ -100,10 +109,12 @@ def get_model_session(model_name):
             from rembg import new_session
             sess = new_session(target_name)
             _sessions[target_name] = sess
+            _session_errors.pop(target_name, None)
             return sess, target_name
-        except Exception:
+        except Exception as exc:
             # Do not silently substitute another model: the caller needs to
             # report the model that actually ran (or that inference is unavailable).
+            _session_errors[target_name] = f"{type(exc).__name__}: {exc}"
             return None, target_name
     return None, target_name
 
@@ -212,6 +223,8 @@ def rembg_status():
         "input_dir": get_input_dir(),
         "output_dir": get_output_dir(),
         "model_cache_dir": get_model_cache_dir(),
+        "model_cache_warning": _model_cache_warning,
+        "model_errors": dict(_session_errors),
     })
 
 
@@ -302,7 +315,8 @@ def process_image():
         sess, actual_model = get_model_session(model_name)
         kwargs = {}
         if sess is None:
-            raise RuntimeError(f"Could not initialize model '{model_name}'")
+            detail = _session_errors.get(actual_model)
+            raise RuntimeError(f"Could not initialize model '{actual_model}'" + (f": {detail}" if detail else ""))
         kwargs["session"] = sess
 
         # Pass PIL image to rembg
@@ -367,9 +381,9 @@ def process_image():
 @rembg_bp.get("/queue")
 def list_queue():
     """List source images available for processing from input directory."""
-    in_dir = get_input_dir()
     items = []
     try:
+        in_dir = get_input_dir()
         for f in sorted(os.listdir(in_dir)):
             full = os.path.join(in_dir, f)
             if os.path.isfile(full) and os.path.splitext(f)[1].lower() in IMAGE_EXTENSIONS:
@@ -380,8 +394,8 @@ def list_queue():
                     "size": stat.st_size,
                     "mtime": stat.st_mtime,
                 })
-    except Exception:
-        pass
+    except Exception as exc:
+        return jsonify({"items": [], "total": 0, "dir": locals().get("in_dir", ""), "error": f"{type(exc).__name__}: {exc}"}), 500
     return jsonify({"items": items[:50], "total": len(items), "dir": in_dir})
 
 
@@ -429,9 +443,9 @@ def start_batch():
             global _batch_status
             try:
                 from rembg import remove
-                sess, _ = get_model_session(model_name)
+                sess, actual_model = get_model_session(model_name)
                 if sess is None:
-                    raise RuntimeError(f"Could not initialize model '{model_name}'")
+                    raise RuntimeError(f"Could not initialize model '{actual_model}': {_session_errors.get(actual_model, 'session unavailable')}")
                 out_dir = get_output_dir()
                 in_dir = get_input_dir()
 

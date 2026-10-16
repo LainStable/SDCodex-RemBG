@@ -47,7 +47,7 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
   <nav class="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.06em]">
     <span class="flex items-center gap-2 text-white font-semibold mr-2">
       <span class="material-symbols-outlined text-badge-sdxl" style="font-variation-settings:'FILL' 1;">auto_fix_high</span>
-      SDCodex-RemBG <span class="rounded-[3px] border border-badge-checkpoint/40 bg-badge-checkpoint/15 px-1.5 py-0.5 text-primary">v1.8.1</span>
+      SDCodex-RemBG <span class="rounded-[3px] border border-badge-checkpoint/40 bg-badge-checkpoint/15 px-1.5 py-0.5 text-primary">v1.8.2</span>
     </span>
     <span class="text-ink-faint">· Neural Studio &amp; Batch Matting</span>
   </nav>
@@ -63,7 +63,7 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
       <div>
         <div class="flex items-center gap-2 font-mono">
           <strong class="font-display text-sm text-white font-semibold">SDCodex-RemBG</strong>
-          <span class="rounded-[3px] bg-badge-checkpoint/15 text-primary border border-badge-checkpoint/40 px-1.5 py-0.2 text-[10px] font-semibold">OFFICIAL v1.8.1</span>
+          <span class="rounded-[3px] bg-badge-checkpoint/15 text-primary border border-badge-checkpoint/40 px-1.5 py-0.2 text-[10px] font-semibold">OFFICIAL v1.8.2</span>
           <span class="hidden sm:inline-block rounded-[3px] bg-badge-sdxl/15 text-secondary border border-badge-sdxl/40 px-1.5 py-0.2 text-[10px] font-semibold">COMFY-NODE READY</span>
         </div>
         <p class="font-mono text-xs text-outline hidden md:block">High-Precision Alpha Matte Extraction &amp; Generative Neural Replacement</p>
@@ -444,8 +444,8 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
   async function loadQueue() {
     try {
       const res = await fetch('/rembg/api/queue');
-      if (!res.ok) return;
       const d = await res.json();
+      if (!res.ok) throw new Error(d.error || `Queue request failed (${res.status})`);
       const items = d.items || [];
       dom.queueBadge.textContent = `${items.length} Items`;
 
@@ -469,6 +469,9 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
       });
     } catch(e) {
       console.error(e);
+      dom.queueBadge.textContent = 'Unavailable';
+      dom.statReady.textContent = `Input directory error: ${e.message}`;
+      dom.statReady.className = 'text-status-alert';
     }
   }
 

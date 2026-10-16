@@ -1,7 +1,7 @@
 {
   "id": "rembg",
   "name": "rembg",
-  "version": "1.8.1",
+  "version": "1.8.2",
   "description": "High-precision neural background removal, alpha matting, and batch processing powered by BiRefNet & RemBG.",
   "author": "LainStable",
   "repository": "https://github.com/LainStable/SDCodex-RemBG",

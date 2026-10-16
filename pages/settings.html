@@ -61,6 +61,7 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
         <label class="text-[10px] uppercase text-outline block mb-1">Persistent Model Cache (HFH)</label>
         <input id="cfg-model-cache" type="text" class="w-full rounded-lg border border-outline-variant/40 bg-surface-container-lowest px-3 py-2 text-white focus:outline-none focus:border-badge-checkpoint" readonly/>
         <p class="text-[10px] text-outline mt-1">ONNX model weights are stored here so they are reused after container restarts.</p>
+        <p id="cfg-cache-warning" class="hidden text-[10px] text-status-warning mt-1"></p>
       </div>
     </div>
   </div>
@@ -98,6 +99,11 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
       document.getElementById('cfg-input-dir').value = d.input_dir || '';
       document.getElementById('cfg-output-dir').value = d.output_dir || '';
       document.getElementById('cfg-model-cache').value = d.model_cache_dir || '';
+      if (d.model_cache_warning) {
+        const warning = document.getElementById('cfg-cache-warning');
+        warning.textContent = d.model_cache_warning;
+        warning.classList.remove('hidden');
+      }
       document.getElementById('cfg-device').textContent = d.device || 'CPU';
       const engine = document.getElementById('cfg-engine');
       engine.textContent = d.rembg_available ? `${d.engine} · available` : 'RemBG package unavailable';

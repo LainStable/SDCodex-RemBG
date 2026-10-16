@@ -9,7 +9,8 @@ import re
 import threading
 import time
 from urllib.parse import unquote
-from flask import Blueprint, jsonify, request, send_file
+from flask import Blueprint, current_app, jsonify, request, send_file
+from werkzeug.exceptions import HTTPException
 from PIL import Image, ImageFilter, ImageOps
 import numpy as np
 
@@ -230,36 +231,37 @@ def rembg_status():
 
 @rembg_bp.get("/models")
 def list_models():
-    return jsonify({
-        "models": [
-            {
-                "id": "birefnet-general",
-                "name": "BiRefNet General",
-                "desc": "Recommended for complex limbs & hair (Bilateral Reference)",
-                "default": True,
-            },
-            {
-                "id": "birefnet-portrait",
-                "name": "BiRefNet Portrait",
-                "desc": "Fine strand alpha matting tuned for portraits",
-            },
-            {
-                "id": "u2net",
-                "name": "U2Net Ultra Fast",
-                "desc": "Low latency general salient object detection",
-            },
-            {
-                "id": "isnet-general-use",
-                "name": "IS-Net / DIS",
-                "desc": "High edge sharpness for fine mechanical & structure edges",
-            },
-            {
-                "id": "silueta",
-                "name": "Silueta (Compact)",
-                "desc": "Lightweight model for low memory / fast inference",
-            },
-        ]
-    })
+    """Available local ONNX models and their upstream download sources."""
+    models = [
+        ("birefnet-general", "BiRefNet General", "Recommended general model", "BiRefNet-general-epoch_244.onnx", True),
+        ("birefnet-general-lite", "BiRefNet General Lite", "Lightweight general model", "BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx", False),
+        ("birefnet-portrait", "BiRefNet Portrait", "Human portraits", "BiRefNet-portrait-epoch_150.onnx", False),
+        ("birefnet-dis", "BiRefNet DIS", "Dichotomous image segmentation", "BiRefNet-DIS-epoch_590.onnx", False),
+        ("birefnet-hrsod", "BiRefNet HRSOD", "High-resolution salient objects", "BiRefNet-HRSOD_DHU-epoch_115.onnx", False),
+        ("birefnet-cod", "BiRefNet COD", "Concealed object detection", "BiRefNet-COD-epoch_125.onnx", False),
+        ("birefnet-massive", "BiRefNet Massive", "Broad dataset model", "BiRefNet-massive-TR_DIS5K_TR_TEs-epoch_420.onnx", False),
+        ("bria-rmbg", "BRIA RMBG 2.0", "High quality; review license terms", "bria-rmbg-2.0.onnx", False),
+        ("u2net", "U2Net", "General purpose", "u2net.onnx", False),
+        ("u2netp", "U2NetP", "Lightweight U2Net", "u2netp.onnx", False),
+        ("u2net_human_seg", "U2Net Human Segmentation", "Human segmentation", "u2net_human_seg.onnx", False),
+        ("u2net_cloth_seg", "U2Net Cloth Segmentation", "Clothing parsing", "u2net_cloth_seg.onnx", False),
+        ("isnet-general-use", "IS-Net General", "General purpose", "isnet-general-use.onnx", False),
+        ("isnet-anime", "IS-Net Anime", "Anime character segmentation", "isnet-anime.onnx", False),
+        ("silueta", "Silueta", "Compact model", "silueta.onnx", False),
+    ]
+    return jsonify({"models": [
+        {"id": model_id, "name": name, "desc": desc, "default": default,
+         "source": f"https://github.com/danielgatis/rembg/releases/download/v0.0.0/{filename}"}
+        for model_id, name, desc, filename, default in models
+    ]})
+
+
+@rembg_bp.errorhandler(Exception)
+def api_exception(error):
+    if isinstance(error, HTTPException):
+        return jsonify({"ok": False, "error": error.description}), error.code
+    current_app.logger.exception("Unhandled RemBG API error")
+    return jsonify({"ok": False, "error": f"{type(error).__name__}: {error}"}), 500
 
 
 @rembg_bp.post("/process")

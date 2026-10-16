@@ -94,8 +94,11 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
 (async function() {
   try {
     const res = await fetch('/rembg/api/status');
+    const text = await res.text();
+    let d;
+    try { d = JSON.parse(text); }
+    catch (_) { throw new Error(`Status check returned non-JSON (HTTP ${res.status})`); }
     if (res.ok) {
-      const d = await res.json();
       document.getElementById('cfg-input-dir').value = d.input_dir || '';
       document.getElementById('cfg-output-dir').value = d.output_dir || '';
       document.getElementById('cfg-model-cache').value = d.model_cache_dir || '';

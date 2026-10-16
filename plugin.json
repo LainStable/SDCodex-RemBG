@@ -1,6 +1,6 @@
 {
   "id": "rembg",
-  "name": "RemBG Background Tools",
+  "name": "rembg",
   "version": "1.8.0",
   "description": "High-precision neural background removal, alpha matting, and batch processing powered by BiRefNet & RemBG.",
   "author": "LainStable",

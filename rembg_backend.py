@@ -67,6 +67,16 @@ def get_output_dir():
     return os.path.abspath(cand)
 
 
+def get_model_cache_dir():
+    """Use the plugin's persistent model volume for ONNX model weights."""
+    cache_dir = os.environ.get("U2NET_HOME") or os.environ.get("HFH") or "/data/huggingface"
+    cache_dir = os.path.abspath(os.path.expanduser(cache_dir))
+    os.makedirs(cache_dir, exist_ok=True)
+    # rembg checks this variable when it initializes a session.
+    os.environ.setdefault("U2NET_HOME", cache_dir)
+    return cache_dir
+
+
 def get_model_session(model_name):
     """Retrieve or initialize a cached rembg model session."""
     name = (model_name or "birefnet-general").strip().lower()
@@ -86,6 +96,7 @@ def get_model_session(model_name):
         if target_name in _sessions:
             return _sessions[target_name], target_name
         try:
+            get_model_cache_dir()
             from rembg import new_session
             sess = new_session(target_name)
             _sessions[target_name] = sess
@@ -200,6 +211,7 @@ def rembg_status():
         "rembg_available": rembg_available,
         "input_dir": get_input_dir(),
         "output_dir": get_output_dir(),
+        "model_cache_dir": get_model_cache_dir(),
     })
 
 

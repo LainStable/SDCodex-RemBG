@@ -73,9 +73,9 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
     <!-- Telemetry & Action Buttons -->
     <div class="flex flex-wrap items-center gap-2 font-mono text-[11px]">
       <div class="flex items-center gap-1.5 px-2.5 py-1 rounded bg-surface-container-high border border-outline-variant/30">
-        <span class="w-2 h-2 rounded-full bg-status-active"></span>
+        <span id="tel-engine-dot" class="w-2 h-2 rounded-full bg-outline"></span>
         <span class="text-outline">Engine:</span>
-        <span id="tel-engine" class="text-white font-medium">BiRefNet</span>
+        <span id="tel-engine" class="text-white font-medium">Loading…</span>
       </div>
       <div class="flex items-center gap-1.5 px-2.5 py-1 rounded bg-surface-container-high border border-outline-variant/30">
         <span class="material-symbols-outlined text-[14px] text-badge-sdxl">memory</span>
@@ -119,10 +119,6 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
 
           <!-- Annotations & Zoom -->
           <div class="flex items-center gap-3 text-outline">
-            <label class="flex items-center gap-1.5 cursor-pointer hover:text-white select-none">
-              <input id="chk-bbox" type="checkbox" checked class="rounded bg-surface-container border-outline-variant text-badge-checkpoint focus:ring-0 w-3.5 h-3.5 accent-[#6366f1]"/>
-              <span>B-Box Guide</span>
-            </label>
             <div class="flex items-center gap-1">
               <button id="btn-zoom-out" class="p-1 rounded hover:bg-surface-container-high hover:text-white" title="Zoom Out"><span class="material-symbols-outlined text-[15px]">remove</span></button>
               <span id="zoom-level" class="px-1 text-white font-semibold text-[11px]">FIT</span>
@@ -165,17 +161,6 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
             <img id="img-mask" class="max-h-full max-w-full object-contain pointer-events-none" src="" alt="Alpha Mask"/>
           </div>
 
-          <!-- Bounding Box Annotation Overlay -->
-          <div id="bbox-overlay" class="hidden absolute inset-x-20 inset-y-12 border border-dashed border-badge-sdxl/60 pointer-events-none rounded">
-            <div class="absolute -top-2.5 left-4 px-1.5 py-0.2 rounded bg-surface-container-lowest border border-badge-sdxl/50 text-[9px] font-mono text-badge-sdxl">
-              TARGET DETECTED [CONF: 99.4%]
-            </div>
-            <div class="absolute top-0 left-0 w-2 h-2 border-t-2 border-l-2 border-badge-sdxl"></div>
-            <div class="absolute top-0 right-0 w-2 h-2 border-t-2 border-r-2 border-badge-sdxl"></div>
-            <div class="absolute bottom-0 left-0 w-2 h-2 border-b-2 border-l-2 border-badge-sdxl"></div>
-            <div class="absolute bottom-0 right-0 w-2 h-2 border-b-2 border-r-2 border-badge-sdxl"></div>
-          </div>
-
           <!-- Split View Divider Handle -->
           <div id="divider-bar" class="hidden absolute top-0 bottom-0 left-[50%] w-0.5 bg-white shadow-[0_0_12px_rgba(255,255,255,0.8)] z-30 cursor-ew-resize flex items-center justify-center">
             <div class="w-6 h-6 rounded-full bg-slate-surface border-2 border-white flex items-center justify-center shadow-xl text-white">
@@ -197,13 +182,13 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
         <div class="flex flex-wrap items-center justify-between px-3 py-2 bg-surface-container-lowest border-t border-outline-variant/30 font-mono text-[11px] text-outline">
           <div class="flex items-center gap-3">
             <span>Dims: <strong id="stat-dims" class="text-white">-- × --</strong></span>
-            <span>Depth: <strong id="stat-depth" class="text-white">32-bit RGBA</strong></span>
+            <span>Source: <strong id="stat-depth" class="text-white">--</strong></span>
             <span>Inference: <strong id="stat-time" class="text-badge-sdxl">-- ms</strong></span>
           </div>
           <div class="flex items-center gap-2">
-            <span id="stat-defringe" class="text-outline">Edge Defringe: <strong class="text-badge-flux">ON</strong></span>
+            <span id="stat-defringe" class="text-outline">Edge Despill: <strong id="stat-despill" class="text-badge-flux">ON</strong></span>
             <span class="text-outline-variant">•</span>
-            <span id="stat-ready" class="text-badge-checkpoint">Studio Ready</span>
+            <span id="stat-ready" class="text-badge-checkpoint">Checking engine…</span>
           </div>
         </div>
       </div>
@@ -384,6 +369,7 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
 
   const dom = {
     telEngine: document.getElementById('tel-engine'),
+    telEngineDot: document.getElementById('tel-engine-dot'),
     telDevice: document.getElementById('tel-device'),
     selectModel: document.getElementById('select-model'),
     fileInput: document.getElementById('file-input'),
@@ -398,11 +384,11 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
     layerMask: document.getElementById('layer-mask'),
     imgMask: document.getElementById('img-mask'),
     divider: document.getElementById('divider-bar'),
-    bbox: document.getElementById('bbox-overlay'),
-    chkBbox: document.getElementById('chk-bbox'),
     chipLeft: document.getElementById('chip-left'),
     chipRight: document.getElementById('chip-right'),
     statDims: document.getElementById('stat-dims'),
+    statDepth: document.getElementById('stat-depth'),
+    statDespill: document.getElementById('stat-despill'),
     statTime: document.getElementById('stat-time'),
     statReady: document.getElementById('stat-ready'),
     btnProcessActive: document.getElementById('btn-process-active'),
@@ -444,8 +430,11 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
       const res = await fetch('/rembg/api/status');
       if (!res.ok) return;
       const d = await res.json();
-      dom.telEngine.textContent = 'BiRefNet / U2Net';
+      dom.telEngine.textContent = d.engine || 'RemBG';
+      dom.telEngineDot.className = `w-2 h-2 rounded-full ${d.rembg_available ? 'bg-status-active' : 'bg-status-alert'}`;
       dom.telDevice.textContent = d.device || 'CPU';
+      dom.statReady.textContent = d.rembg_available ? 'Engine Ready' : 'Engine Unavailable';
+      dom.statReady.className = d.rembg_available ? 'text-status-active' : 'text-status-alert';
       if (d.output_dir) dom.outDestDir.value = d.output_dir;
     } catch(e) {
       console.error(e);
@@ -486,6 +475,7 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
   function handleFileSelect(file) {
     if (!file) return;
     currentFile = file;
+    dom.statDepth.textContent = file.type ? file.type.replace('image/', '').toUpperCase() : 'Image';
     const reader = new FileReader();
     reader.onload = (e) => {
       currentOrigUrl = e.target.result;
@@ -565,10 +555,6 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
       dom.statReady.textContent = 'Alpha Matte Extracted';
       dom.statReady.className = 'text-status-active font-semibold';
       dom.btnExportAlpha.disabled = false;
-
-      if (dom.chkBbox.checked) {
-        dom.bbox.classList.remove('hidden');
-      }
 
       setMode('split');
     } catch(e) {
@@ -716,6 +702,10 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
   dom.rangeFeather.addEventListener('input', (e) => {
     dom.valFeather.textContent = `${e.target.value} px`;
   });
+  dom.chkDespill.addEventListener('change', () => {
+    dom.statDespill.textContent = dom.chkDespill.checked ? 'ON' : 'OFF';
+    dom.statDespill.className = dom.chkDespill.checked ? 'text-badge-flux' : 'text-outline';
+  });
 
   // Swatches
   document.querySelectorAll('.color-swatch').forEach(btn => {
@@ -742,15 +732,9 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
   dom.fmtWebp.addEventListener('click', () => setFormat('webp'));
   dom.fmtMask.addEventListener('click', () => setFormat('mask'));
 
-  dom.chkBbox.addEventListener('change', (e) => {
-    if (e.target.checked && currentCutoutUrl) {
-      dom.bbox.classList.remove('hidden');
-    } else {
-      dom.bbox.classList.add('hidden');
-    }
-  });
-
   // Batch commit
+  const startBatchFromHeader = () => dom.btnCommitBatch.click();
+  document.getElementById('btn-batch-modal').addEventListener('click', startBatchFromHeader);
   dom.btnCommitBatch.addEventListener('click', async () => {
     if (!confirm('Start batch background removal on all images in the input folder?')) return;
     dom.btnCommitBatch.disabled = true;
@@ -762,6 +746,11 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
           model: dom.selectModel.value,
           target_mode: currentTargetMode,
           bgcolor: dom.inputHex.value,
+          format: currentFormat,
+          threshold: parseFloat(dom.rangeThresh.value),
+          erosion: parseFloat(dom.rangeErosion.value),
+          feather: parseFloat(dom.rangeFeather.value),
+          despill: dom.chkDespill.checked,
         }),
       });
       const d = await res.json();

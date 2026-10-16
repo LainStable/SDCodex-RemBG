@@ -76,8 +76,8 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
       </div>
       <div class="p-3 rounded-lg border border-outline-variant/20 bg-surface-container-lowest">
         <span class="text-outline text-[10px] uppercase block mb-1">Engine Backend</span>
-        <span class="text-status-active font-semibold flex items-center gap-1">
-          <span class="w-2 h-2 rounded-full bg-status-active"></span> ONNX Runtime + BiRefNet
+        <span id="cfg-engine" class="text-outline font-semibold flex items-center gap-1">
+          Checking engine…
         </span>
       </div>
     </div>
@@ -93,6 +93,9 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
       document.getElementById('cfg-input-dir').value = d.input_dir || '';
       document.getElementById('cfg-output-dir').value = d.output_dir || '';
       document.getElementById('cfg-device').textContent = d.device || 'CPU';
+      const engine = document.getElementById('cfg-engine');
+      engine.textContent = d.rembg_available ? `${d.engine} · available` : 'RemBG package unavailable';
+      engine.className = d.rembg_available ? 'text-status-active font-semibold flex items-center gap-1' : 'text-status-alert font-semibold flex items-center gap-1';
     }
   } catch(e) {
     console.error(e);

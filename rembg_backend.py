@@ -80,7 +80,7 @@ def get_model_session(model_name):
         "isnet-general-use": "isnet-general-use",
         "silueta": "silueta",
     }
-    target_name = alias_map.get(name, "u2net")
+    target_name = alias_map.get(name, name)
 
     with _session_lock:
         if target_name in _sessions:
@@ -91,15 +91,9 @@ def get_model_session(model_name):
             _sessions[target_name] = sess
             return sess, target_name
         except Exception:
-            # Fallback to default u2net session if specific model fails (e.g. offline)
-            if target_name != "u2net":
-                try:
-                    from rembg import new_session
-                    sess = new_session("u2net")
-                    _sessions["u2net"] = sess
-                    return sess, "u2net"
-                except Exception:
-                    pass
+            # Do not silently substitute another model: the caller needs to
+            # report the model that actually ran (or that inference is unavailable).
+            return None, target_name
     return None, target_name
 
 
@@ -193,11 +187,17 @@ def rembg_status():
     except Exception:
         pass
 
+    try:
+        import rembg  # noqa: F401
+        rembg_available = True
+    except Exception:
+        rembg_available = False
     return jsonify({
         "engine": "BiRefNet / RemBG Neural Matting",
         "device": device_name,
         "cuda": cuda_avail,
-        "active_models": list(_sessions.keys()) or ["birefnet-general (ready)"],
+        "active_models": list(_sessions.keys()),
+        "rembg_available": rembg_available,
         "input_dir": get_input_dir(),
         "output_dir": get_output_dir(),
     })
@@ -249,19 +249,25 @@ def process_image():
     if "file" in request.files:
         f = request.files["file"]
         orig_name = f.filename or "image.png"
-        input_pil = Image.open(f.stream).convert("RGBA")
+        try:
+            input_pil = Image.open(f.stream).convert("RGBA")
+        except Exception:
+            return jsonify({"ok": False, "error": "Uploaded file is not a readable image"}), 400
     elif data.get("image"):
         orig_name = data.get("name", "uploaded.png")
         input_pil = base64_to_pil(data["image"])
     elif data.get("path"):
         path = unquote(data["path"])
-        if os.path.isabs(path) and os.path.isfile(path):
-            full_path = path
-        else:
-            full_path = os.path.join(get_input_dir(), path)
+        root = os.path.realpath(get_input_dir())
+        full_path = os.path.realpath(path if os.path.isabs(path) else os.path.join(root, path))
+        if os.path.commonpath((root, full_path)) != root:
+            return jsonify({"ok": False, "error": "Image path is outside the input directory"}), 400
         if os.path.isfile(full_path):
             orig_name = os.path.basename(full_path)
-            input_pil = Image.open(full_path).convert("RGBA")
+            try:
+                input_pil = Image.open(full_path).convert("RGBA")
+            except Exception:
+                return jsonify({"ok": False, "error": "File is not a readable image"}), 400
 
     if input_pil is None:
         return jsonify({"ok": False, "error": "No valid input image provided"}), 400
@@ -283,8 +289,9 @@ def process_image():
         from rembg import remove
         sess, actual_model = get_model_session(model_name)
         kwargs = {}
-        if sess:
-            kwargs["session"] = sess
+        if sess is None:
+            raise RuntimeError(f"Could not initialize model '{model_name}'")
+        kwargs["session"] = sess
 
         # Pass PIL image to rembg
         cutout = remove(input_pil, **kwargs)
@@ -305,12 +312,12 @@ def process_image():
     mask_img = Image.merge("RGB", (alpha_channel, alpha_channel, alpha_channel))
 
     # Target Mode Compositing
-    if target_mode == "color":
+    if output_format == "mask" or target_mode == "mask":
+        final_img = mask_img
+    elif target_mode in ("color", "composite"):
         rgb_color = hex_to_rgb(bgcolor)
         bg = Image.new("RGBA", refined.size, rgb_color + (255,))
         final_img = Image.alpha_composite(bg, refined)
-    elif target_mode == "mask":
-        final_img = mask_img
     else:  # transparent or default
         final_img = refined
 
@@ -320,9 +327,9 @@ def process_image():
     saved_path = None
     if save_output:
         out_dir = get_output_dir()
-        stem = os.path.splitext(orig_name)[0]
-        ext = "png" if output_format == "png" or target_mode == "transparent" else "webp"
-        target_filename = f"{stem}_cutout_{int(time.time())}.{ext}"
+        stem = os.path.splitext(os.path.basename(orig_name))[0]
+        ext = "png" if output_format in ("png", "mask") or target_mode == "transparent" else "webp"
+        target_filename = f"{stem}_cutout_{int(time.time() * 1000)}.{ext}"
         saved_path = os.path.join(out_dir, target_filename)
         final_img.save(saved_path)
 
@@ -375,9 +382,16 @@ def start_batch():
 
         data = request.get_json(silent=True) or {}
         items = data.get("items", [])
+        if not isinstance(items, list):
+            return jsonify({"ok": False, "error": "items must be a list"}), 400
         model_name = data.get("model", "birefnet-general")
         target_mode = data.get("target_mode", "transparent")
         bgcolor = data.get("bgcolor", "#0F131C")
+        output_format = str(data.get("format", "png")).lower()
+        threshold = float(data.get("threshold", 0.85))
+        erosion = float(data.get("erosion", -0.5))
+        feather = float(data.get("feather", 1.5))
+        despill = bool(data.get("despill", True))
 
         if not items:
             # Auto-populate from input dir
@@ -401,42 +415,56 @@ def start_batch():
 
         def run_batch():
             global _batch_status
-            from rembg import remove
-            sess, _ = get_model_session(model_name)
-            out_dir = get_output_dir()
-            in_dir = get_input_dir()
+            try:
+                from rembg import remove
+                sess, _ = get_model_session(model_name)
+                if sess is None:
+                    raise RuntimeError(f"Could not initialize model '{model_name}'")
+                out_dir = get_output_dir()
+                in_dir = get_input_dir()
 
-            for idx, item in enumerate(items):
-                if _batch_cancel.is_set():
-                    break
-                full_in = item if os.path.isabs(item) else os.path.join(in_dir, item)
-                fname = os.path.basename(full_in)
-                _batch_status["current_file"] = fname
+                for item in items:
+                    if _batch_cancel.is_set():
+                        break
+                    full_in = os.path.realpath(item if os.path.isabs(item) else os.path.join(in_dir, item))
+                    if os.path.commonpath((os.path.realpath(in_dir), full_in)) != os.path.realpath(in_dir):
+                        _batch_status["errors"] += 1
+                        _batch_status["items"].append({"file": os.path.basename(str(item)), "status": "error", "error": "Path is outside input directory"})
+                        continue
+                    fname = os.path.basename(full_in)
+                    _batch_status["current_file"] = fname
 
-                try:
-                    with Image.open(full_in) as raw:
-                        img = raw.convert("RGBA")
-                    cutout = remove(img, session=sess) if sess else remove(img)
-                    refined = apply_matte_refinements(cutout)
+                    try:
+                        with Image.open(full_in) as raw:
+                            img = raw.convert("RGBA")
+                        cutout = remove(img, session=sess)
+                        refined = apply_matte_refinements(cutout, threshold, erosion, feather, despill)
 
-                    if target_mode == "color":
-                        bg = Image.new("RGBA", refined.size, hex_to_rgb(bgcolor) + (255,))
-                        res = Image.alpha_composite(bg, refined)
-                    else:
-                        res = refined
+                        if target_mode == "mask" or output_format == "mask":
+                            alpha = refined.getchannel("A")
+                            res = Image.merge("RGB", (alpha, alpha, alpha))
+                        elif target_mode in ("color", "composite"):
+                            bg = Image.new("RGBA", refined.size, hex_to_rgb(bgcolor) + (255,))
+                            res = Image.alpha_composite(bg, refined)
+                        else:
+                            res = refined
 
-                    stem = os.path.splitext(fname)[0]
-                    out_path = os.path.join(out_dir, f"{stem}_cutout.png")
-                    res.save(out_path)
+                        stem = os.path.splitext(fname)[0]
+                        out_ext = "webp" if output_format == "webp" and target_mode != "transparent" else "png"
+                        out_path = os.path.join(out_dir, f"{stem}_cutout_{int(time.time() * 1000)}.{out_ext}")
+                        res.save(out_path, format=out_ext.upper())
 
-                    _batch_status["processed"] += 1
-                    _batch_status["items"].append({"file": fname, "status": "done", "output": out_path})
-                except Exception as e:
-                    _batch_status["errors"] += 1
-                    _batch_status["items"].append({"file": fname, "status": "error", "error": str(e)})
-
-            _batch_status["running"] = False
-            _batch_status["current_file"] = ""
+                        _batch_status["processed"] += 1
+                        _batch_status["items"].append({"file": fname, "status": "done", "output": out_path})
+                    except Exception as e:
+                        _batch_status["errors"] += 1
+                        _batch_status["items"].append({"file": fname, "status": "error", "error": str(e)})
+            except Exception as e:
+                _batch_status["errors"] += max(0, len(items) - len(_batch_status["items"]))
+                _batch_status["items"].append({"file": "batch", "status": "error", "error": str(e)})
+            finally:
+                _batch_status["running"] = False
+                _batch_status["current_file"] = ""
 
         threading.Thread(target=run_batch, daemon=True).start()
         return jsonify({"ok": True, "total": len(items)})
@@ -476,8 +504,13 @@ def list_outputs():
 @rembg_bp.get("/file/<path:filename>")
 def stream_file(filename):
     clean = unquote(filename).strip("/\\")
-    out_path = os.path.join(get_output_dir(), clean)
-    in_path = os.path.join(get_input_dir(), clean)
+    out_root = os.path.realpath(get_output_dir())
+    in_root = os.path.realpath(get_input_dir())
+    out_path = os.path.realpath(os.path.join(out_root, clean))
+    in_path = os.path.realpath(os.path.join(in_root, clean))
+    if not (os.path.commonpath((out_root, out_path)) == out_root or
+            os.path.commonpath((in_root, in_path)) == in_root):
+        return "File not found", 404
 
     target = out_path if os.path.isfile(out_path) else in_path
     if not os.path.isfile(target):

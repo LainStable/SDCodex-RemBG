@@ -6,11 +6,14 @@ import json
 import mimetypes
 import os
 import re
+import shutil
+import tempfile
 import threading
 import time
 from urllib.parse import unquote
 from flask import Blueprint, current_app, jsonify, request, send_file
 from werkzeug.exceptions import HTTPException
+from werkzeug.utils import secure_filename
 from PIL import Image, ImageFilter, ImageOps
 import numpy as np
 
@@ -407,18 +410,63 @@ def start_batch():
     with _batch_lock:
         if _batch_status["running"]:
             return jsonify({"ok": False, "error": "A batch job is already running"}), 409
+        app = current_app._get_current_object()
 
-        data = request.get_json(silent=True) or {}
+        uploaded_files = request.files.getlist("files")
+        if request.mimetype == "multipart/form-data":
+            try:
+                data = json.loads(request.form.get("options", "{}"))
+            except (TypeError, ValueError):
+                return jsonify({"ok": False, "error": "options must contain valid JSON"}), 400
+            if not isinstance(data, dict):
+                return jsonify({"ok": False, "error": "options must be an object"}), 400
+        else:
+            data = request.get_json(silent=True) or {}
         items = data.get("items", [])
         if not isinstance(items, list):
             return jsonify({"ok": False, "error": "items must be a list"}), 400
+        if not uploaded_files and any(not isinstance(item, str) for item in items):
+            return jsonify({"ok": False, "error": "items must contain image paths"}), 400
+        staging_dir = None
+
+        def cleanup_staging():
+            if not staging_dir:
+                return
+            try:
+                shutil.rmtree(staging_dir)
+            except OSError:
+                app.logger.exception("Could not remove RemBG batch upload directory %s", staging_dir)
+
+        if uploaded_files:
+            staging_dir = tempfile.mkdtemp(prefix="rembg-batch-")
+            items = []
+            try:
+                for index, uploaded_file in enumerate(uploaded_files, start=1):
+                    original_name = secure_filename(uploaded_file.filename or "")
+                    extension = os.path.splitext(original_name)[1].lower()
+                    if extension not in IMAGE_EXTENSIONS:
+                        continue
+                    safe_name = original_name or f"image{extension}"
+                    staged_path = os.path.join(staging_dir, f"{index:04d}_{safe_name}")
+                    uploaded_file.save(staged_path)
+                    items.append({"path": staged_path, "name": safe_name})
+            except Exception:
+                cleanup_staging()
+                raise
+            if not items:
+                cleanup_staging()
+                return jsonify({"ok": False, "error": "No supported image files were uploaded"}), 400
         model_name = data.get("model", "birefnet-general")
         target_mode = data.get("target_mode", "transparent")
         bgcolor = data.get("bgcolor", "#0F131C")
         output_format = str(data.get("format", "png")).lower()
-        threshold = float(data.get("threshold", 0.85))
-        erosion = float(data.get("erosion", -0.5))
-        feather = float(data.get("feather", 1.5))
+        try:
+            threshold = float(data.get("threshold", 0.85))
+            erosion = float(data.get("erosion", -0.5))
+            feather = float(data.get("feather", 1.5))
+        except (TypeError, ValueError):
+            cleanup_staging()
+            return jsonify({"ok": False, "error": "threshold, erosion, and feather must be numbers"}), 400
         despill = bool(data.get("despill", True))
 
         if not items:
@@ -454,12 +502,16 @@ def start_batch():
                 for item in items:
                     if _batch_cancel.is_set():
                         break
-                    full_in = os.path.realpath(item if os.path.isabs(item) else os.path.join(in_dir, item))
-                    if os.path.commonpath((os.path.realpath(in_dir), full_in)) != os.path.realpath(in_dir):
+                    uploaded_name = item.get("name") if isinstance(item, dict) else None
+                    item_path = item["path"] if isinstance(item, dict) else item
+                    source_root = staging_dir if isinstance(item, dict) else in_dir
+                    source_root = os.path.realpath(source_root)
+                    full_in = os.path.realpath(item_path if os.path.isabs(item_path) else os.path.join(source_root, item_path))
+                    if os.path.commonpath((source_root, full_in)) != source_root:
                         _batch_status["errors"] += 1
                         _batch_status["items"].append({"file": os.path.basename(str(item)), "status": "error", "error": "Path is outside input directory"})
                         continue
-                    fname = os.path.basename(full_in)
+                    fname = uploaded_name or os.path.basename(full_in)
                     _batch_status["current_file"] = fname
 
                     try:
@@ -493,6 +545,7 @@ def start_batch():
             finally:
                 _batch_status["running"] = False
                 _batch_status["current_file"] = ""
+                cleanup_staging()
 
         threading.Thread(target=run_batch, daemon=True).start()
         return jsonify({"ok": True, "total": len(items)})

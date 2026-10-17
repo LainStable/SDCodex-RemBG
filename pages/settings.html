@@ -39,19 +39,13 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
   <div class="rounded-xl border border-outline-variant/30 bg-surface-container-low p-5 flex flex-col gap-5 shadow-sm">
     <div class="flex items-center justify-between border-b border-outline-variant/20 pb-3">
       <div>
-        <h2 class="font-display font-semibold text-white text-base">Pipeline &amp; Directory Paths</h2>
-        <p class="font-mono text-xs text-outline mt-0.5">Where RemBG reads source images and saves clean alpha cutouts.</p>
+        <h2 class="font-display font-semibold text-white text-base">Storage &amp; Model Paths</h2>
+        <p class="font-mono text-xs text-outline mt-0.5">Source images are selected in the studio; processed cutouts and model weights are stored here.</p>
       </div>
       <span class="rounded bg-badge-checkpoint/20 text-badge-checkpoint border border-badge-checkpoint/30 px-2 py-0.5 font-mono text-[10px]">VOLUMES</span>
     </div>
 
     <div class="space-y-4 font-mono text-xs">
-      <div>
-        <label class="text-[10px] uppercase text-outline block mb-1">Source Input Directory (REMBG_INPUT)</label>
-        <input id="cfg-input-dir" type="text" class="w-full rounded-lg border border-outline-variant/40 bg-surface-container-lowest px-3 py-2 text-white focus:outline-none focus:border-badge-checkpoint" readonly/>
-        <p class="text-[10px] text-outline mt-1">Directory scanned for images in the studio batch queue.</p>
-      </div>
-
       <div>
         <label class="text-[10px] uppercase text-outline block mb-1">Output Cutouts Directory (REMBG_OUTPUT)</label>
         <input id="cfg-output-dir" type="text" class="w-full rounded-lg border border-outline-variant/40 bg-surface-container-lowest px-3 py-2 text-white focus:outline-none focus:border-badge-checkpoint" readonly/>
@@ -99,7 +93,6 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
     try { d = JSON.parse(text); }
     catch (_) { throw new Error(`Status check returned non-JSON (HTTP ${res.status})`); }
     if (res.ok) {
-      document.getElementById('cfg-input-dir').value = d.input_dir || '';
       document.getElementById('cfg-output-dir').value = d.output_dir || '';
       document.getElementById('cfg-model-cache').value = d.model_cache_dir || '';
       if (d.model_cache_warning) {

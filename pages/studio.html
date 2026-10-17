@@ -85,7 +85,7 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
       <div class="flex items-center gap-1.5 ml-1">
         <button id="btn-batch-modal" class="px-2.5 py-1 rounded-lg bg-surface-container-high hover:bg-slate-surface border border-outline-variant/40 text-white flex items-center gap-1.5 transition-all">
           <span class="material-symbols-outlined text-[15px]">drive_folder_upload</span>
-          <span>Batch Folder</span>
+          <span>Process Queue</span>
         </button>
         <button id="btn-export-alpha" class="px-2.5 py-1 rounded-lg bg-surface-container-high hover:bg-slate-surface border border-outline-variant/40 text-white flex items-center gap-1.5 transition-all disabled:opacity-40">
           <span class="material-symbols-outlined text-[15px]">file_download</span>
@@ -136,12 +136,11 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
             <div class="w-14 h-14 rounded-full bg-surface-container-high flex items-center justify-center border border-outline-variant/30 text-badge-checkpoint">
               <span class="material-symbols-outlined text-3xl">add_photo_alternate</span>
             </div>
-            <strong class="text-white text-sm font-semibold">Drop image here or choose file</strong>
+            <strong class="text-white text-sm font-semibold">Drop images here or choose files</strong>
             <p class="font-mono text-xs max-w-sm text-ink-muted">Supports PNG, WebP, JPG up to 8K resolution. Process with BiRefNet or U2Net.</p>
             <button id="btn-browse-file" class="mt-2 px-3 py-1.5 rounded-lg bg-badge-checkpoint/20 hover:bg-badge-checkpoint/30 border border-badge-checkpoint text-primary font-mono text-xs font-semibold">
               Browse Image File
             </button>
-            <input id="file-input" type="file" accept="image/*" class="hidden"/>
           </div>
 
           <!-- Original Background Image Layer -->
@@ -191,6 +190,7 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
             <span id="stat-ready" class="text-badge-checkpoint">Checking engine…</span>
           </div>
         </div>
+        <input id="file-input" type="file" accept="image/*" multiple class="hidden"/>
       </div>
 
       <!-- Batch Workspace Queue -->
@@ -202,17 +202,17 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
             <span id="queue-count-badge" class="bg-surface-container-high px-1.5 py-0.2 rounded text-[10px] text-outline">0 Items</span>
           </div>
           <div class="flex items-center gap-2 text-[11px]">
-            <button id="btn-queue-refresh" class="text-primary hover:underline">Reload Input Dir</button>
-            <span class="text-outline-variant">•</span>
-            <button id="btn-queue-clear" class="text-status-alert hover:underline">Clear</button>
+            <button id="btn-queue-clear" class="text-status-alert hover:underline">Clear queue</button>
           </div>
         </div>
 
-        <div id="queue-strip" class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-2 mt-1">
-          <!-- Add Image Tile -->
-          <div id="btn-queue-add" class="rounded-lg border-2 border-dashed border-outline-variant/40 hover:border-badge-checkpoint/60 bg-surface-container-lowest/50 p-2 flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors text-outline hover:text-white h-24">
-            <span class="material-symbols-outlined text-[20px]">add_photo_alternate</span>
-            <span class="text-[9px] font-mono uppercase text-center leading-tight">Drop / Add Images</span>
+        <div id="queue-drop-zone" class="rounded-lg border border-transparent transition-colors">
+          <div id="queue-strip" class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-2 mt-1">
+            <!-- Add Image Tile -->
+            <div id="btn-queue-add" class="rounded-lg border-2 border-dashed border-outline-variant/40 hover:border-badge-checkpoint/60 bg-surface-container-lowest/50 p-2 flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors text-outline hover:text-white h-24">
+              <span class="material-symbols-outlined text-[20px]">add_photo_alternate</span>
+              <span class="text-[9px] font-mono uppercase text-center leading-tight">Browse or Drop Images</span>
+            </div>
           </div>
         </div>
       </div>
@@ -430,8 +430,8 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
     fmtMask: document.getElementById('fmt-mask'),
     btnCommitBatch: document.getElementById('btn-commit-batch'),
     queueStrip: document.getElementById('queue-strip'),
+    queueDropZone: document.getElementById('queue-drop-zone'),
     queueBadge: document.getElementById('queue-count-badge'),
-    btnQueueRefresh: document.getElementById('btn-queue-refresh'),
     btnQueueClear: document.getElementById('btn-queue-clear'),
     btnQueueAdd: document.getElementById('btn-queue-add'),
     btnZoomIn: document.getElementById('btn-zoom-in'),
@@ -475,37 +475,51 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
     }
   }
 
-  async function loadQueue() {
-    try {
-      const res = await fetch('/rembg/api/queue');
-      const d = await parseApiJson(res, 'Queue request');
-      if (!res.ok) throw new Error(d.error || `Queue request failed (${res.status})`);
-      const items = d.items || [];
-      dom.queueBadge.textContent = `${items.length} Items`;
+  const batchFiles = [];
 
-      // Render items in queue strip, keeping the Add button at end
-      dom.queueStrip.querySelectorAll('.queue-item-card').forEach(el => el.remove());
-      items.forEach(item => {
-        const div = document.createElement('div');
-        div.className = 'queue-item-card group relative rounded-lg border border-outline-variant/40 bg-surface-container-lowest p-1.5 flex flex-col gap-1 cursor-pointer hover:border-badge-checkpoint transition-all';
-        div.innerHTML = `
-          <div class="h-16 w-full rounded overflow-hidden checkered-grid relative flex items-center justify-center">
-            <span class="material-symbols-outlined text-outline text-xl">image</span>
-          </div>
-          <div class="flex justify-between items-center text-[10px] font-mono">
-            <span class="text-white truncate">${escapeHtml(item.name)}</span>
-          </div>
-        `;
-        div.addEventListener('click', () => {
-          loadDiskImage(item.path);
-        });
-        dom.queueStrip.insertBefore(div, dom.btnQueueAdd);
+  function renderBatchQueue() {
+    dom.queueStrip.querySelectorAll('.queue-item-card').forEach(el => el.remove());
+    batchFiles.forEach((entry, index) => {
+      const div = document.createElement('div');
+      div.className = 'queue-item-card group relative rounded-lg border border-outline-variant/40 bg-surface-container-lowest p-1.5 flex flex-col gap-1 cursor-pointer hover:border-badge-checkpoint transition-all';
+      div.innerHTML = `
+        <div class="h-16 w-full rounded overflow-hidden checkered-grid relative flex items-center justify-center">
+          <img src="${entry.previewUrl}" alt="" class="h-full w-full object-cover">
+        </div>
+        <div class="flex items-center gap-1 text-[10px] font-mono">
+          <span class="text-white truncate" title="${escapeHtml(entry.file.name)}">${escapeHtml(entry.file.name)}</span>
+          <button type="button" class="queue-remove ml-auto shrink-0 text-outline hover:text-status-alert" aria-label="Remove ${escapeHtml(entry.file.name)}" title="Remove from queue">×</button>
+        </div>
+      `;
+      div.addEventListener('click', () => handleFileSelect(entry.file));
+      div.querySelector('.queue-remove').addEventListener('click', (event) => {
+        event.stopPropagation();
+        URL.revokeObjectURL(entry.previewUrl);
+        batchFiles.splice(index, 1);
+        renderBatchQueue();
       });
-    } catch(e) {
-      console.error(e);
-      dom.queueBadge.textContent = 'Unavailable';
-      dom.statReady.textContent = `Input directory error: ${e.message}`;
-      dom.statReady.className = 'text-status-alert';
+      dom.queueStrip.insertBefore(div, dom.btnQueueAdd);
+    });
+    dom.queueBadge.textContent = `${batchFiles.length} ${batchFiles.length === 1 ? 'Image' : 'Images'}`;
+  }
+
+  function addBatchFiles(files) {
+    const seen = new Set(batchFiles.map(({ file }) => `${file.name}\0${file.size}\0${file.lastModified}`));
+    let rejected = 0;
+    for (const file of files) {
+      if (!(file.type.startsWith('image/') || /\.(jpe?g|png|webp|bmp|tiff?|jfif)$/i.test(file.name))) {
+        rejected++;
+        continue;
+      }
+      const key = `${file.name}\0${file.size}\0${file.lastModified}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      batchFiles.push({ file, previewUrl: URL.createObjectURL(file) });
+    }
+    renderBatchQueue();
+    if (rejected) {
+      dom.statReady.textContent = `${rejected} non-image ${rejected === 1 ? 'file was' : 'files were'} skipped`;
+      dom.statReady.className = 'text-status-warning';
     }
   }
 
@@ -534,18 +548,6 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
       dom.statReady.className = 'text-status-warning';
     };
     reader.readAsDataURL(file);
-  }
-
-  async function loadDiskImage(path) {
-    dom.statReady.textContent = 'Loading from disk...';
-    try {
-      const res = await fetch(`/rembg/api/file/${encodeURIComponent(path)}`);
-      if (!res.ok) throw new Error('File fetch failed');
-      const blob = await res.blob();
-      handleFileSelect(new File([blob], path.split('/').pop()));
-    } catch(e) {
-      alert('Failed to load file: ' + e.message);
-    }
   }
 
   async function processActiveImage() {
@@ -698,9 +700,12 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
   dom.btnBrowse.addEventListener('click', () => dom.fileInput.click());
   dom.btnQueueAdd.addEventListener('click', () => dom.fileInput.click());
   dom.fileInput.addEventListener('change', (e) => {
-    if (e.target.files && e.target.files[0]) {
-      handleFileSelect(e.target.files[0]);
+    const files = Array.from(e.target.files || []);
+    if (files.length) {
+      addBatchFiles(files);
+      handleFileSelect(files[0]);
     }
+    e.target.value = '';
   });
 
   // Drag and drop onto stage
@@ -714,9 +719,26 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
   dom.stage.addEventListener('drop', (e) => {
     e.preventDefault();
     dom.stage.classList.remove('ring-2', 'ring-badge-checkpoint');
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFileSelect(e.dataTransfer.files[0]);
+    const files = Array.from(e.dataTransfer.files || []);
+    if (files.length) {
+      addBatchFiles(files);
+      handleFileSelect(files[0]);
     }
+  });
+
+  dom.queueDropZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dom.queueDropZone.classList.add('border-badge-checkpoint', 'bg-badge-checkpoint/5');
+  });
+  dom.queueDropZone.addEventListener('dragleave', (e) => {
+    if (!dom.queueDropZone.contains(e.relatedTarget)) {
+      dom.queueDropZone.classList.remove('border-badge-checkpoint', 'bg-badge-checkpoint/5');
+    }
+  });
+  dom.queueDropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dom.queueDropZone.classList.remove('border-badge-checkpoint', 'bg-badge-checkpoint/5');
+    addBatchFiles(Array.from(e.dataTransfer.files || []));
   });
 
   dom.btnProcessActive.addEventListener('click', processActiveImage);
@@ -773,22 +795,28 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
   const startBatchFromHeader = () => dom.btnCommitBatch.click();
   document.getElementById('btn-batch-modal').addEventListener('click', startBatchFromHeader);
   dom.btnCommitBatch.addEventListener('click', async () => {
-    if (!confirm('Start batch background removal on all images in the input folder?')) return;
+    if (!batchFiles.length) {
+      alert('Add one or more images to the Batch Workspace Queue first.');
+      return;
+    }
+    if (!confirm(`Start batch background removal on ${batchFiles.length} queued ${batchFiles.length === 1 ? 'image' : 'images'}?`)) return;
     dom.btnCommitBatch.disabled = true;
     try {
+      const form = new FormData();
+      batchFiles.forEach(({ file }) => form.append('files', file, file.name));
+      form.append('options', JSON.stringify({
+        model: dom.selectModel.value,
+        target_mode: currentTargetMode,
+        bgcolor: dom.inputHex.value,
+        format: currentFormat,
+        threshold: parseFloat(dom.rangeThresh.value),
+        erosion: parseFloat(dom.rangeErosion.value),
+        feather: parseFloat(dom.rangeFeather.value),
+        despill: dom.chkDespill.checked,
+      }));
       const res = await fetch('/rembg/api/batch', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: dom.selectModel.value,
-          target_mode: currentTargetMode,
-          bgcolor: dom.inputHex.value,
-          format: currentFormat,
-          threshold: parseFloat(dom.rangeThresh.value),
-          erosion: parseFloat(dom.rangeErosion.value),
-          feather: parseFloat(dom.rangeFeather.value),
-          despill: dom.chkDespill.checked,
-        }),
+        body: form,
       });
       const d = await parseApiJson(res, 'Batch request');
       if (d.ok) {
@@ -803,10 +831,10 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
     }
   });
 
-  dom.btnQueueRefresh.addEventListener('click', loadQueue);
   dom.btnQueueClear.addEventListener('click', () => {
-    dom.queueStrip.querySelectorAll('.queue-item-card').forEach(el => el.remove());
-    dom.queueBadge.textContent = '0 Items';
+    batchFiles.forEach(({ previewUrl }) => URL.revokeObjectURL(previewUrl));
+    batchFiles.length = 0;
+    renderBatchQueue();
   });
 
   function escapeHtml(s) {
@@ -816,7 +844,7 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
 
   // Initialize
   loadStatus();
-  loadQueue();
+  renderBatchQueue();
 })();
 </script>
 </body>

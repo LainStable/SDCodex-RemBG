@@ -1,7 +1,7 @@
 {
   "id": "rembg",
   "name": "rembg",
-  "version": "1.8.4",
+  "version": "1.8.5",
   "description": "High-precision neural background removal, alpha matting, and batch processing powered by BiRefNet & RemBG.",
   "author": "LainStable",
   "repository": "https://github.com/LainStable/SDCodex-RemBG",
@@ -33,5 +33,20 @@
       "description": "Cache directory for BiRefNet and neural model weights"
     }
   ],
-  "entrypoint": "plugin:init_plugin"
+  "entrypoint": "plugin:init_plugin",
+  "assistant_actions": [
+    {
+      "name": "batch_status",
+      "description": "Background-removal batch state and progress.",
+      "method": "GET",
+      "path": "/rembg/api/batch/status"
+    },
+    {
+      "name": "cancel_batch",
+      "description": "Cancel the running background-removal batch.",
+      "method": "POST",
+      "path": "/rembg/api/batch/cancel",
+      "confirm": true
+    }
+  ]
 }

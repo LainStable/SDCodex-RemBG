@@ -19,6 +19,24 @@ import numpy as np
 
 rembg_bp = Blueprint("rembg_bp", __name__, url_prefix="/rembg/api")
 
+
+def _core_session_missing() -> bool:
+    try:
+        from sdcodex import auth as core_auth
+    except Exception:
+        return False  # standalone deployment
+    try:
+        return core_auth.current_user() is None
+    except Exception:
+        return True
+
+
+@rembg_bp.before_request
+def _rembg_auth_guard():
+    if _core_session_missing():
+        return jsonify({"error": "unauthorized"}), 401
+    return None
+
 IMAGE_EXTENSIONS = {
     ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif", ".jfif"
 }

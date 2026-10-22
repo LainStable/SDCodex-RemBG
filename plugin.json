@@ -1,7 +1,7 @@
 {
   "id": "rembg",
   "name": "rembg",
-  "version": "1.9.0",
+  "version": "1.9.1",
   "description": "High-precision neural background removal, alpha matting, and batch processing powered by BiRefNet & RemBG.",
   "task_status": {
     "label": "RemBG",

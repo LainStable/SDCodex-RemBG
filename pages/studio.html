@@ -215,6 +215,27 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
             </div>
           </div>
         </div>
+
+        <!-- Running batch — reattaches from /rembg/api/batch/status after navigating back -->
+        <div id="batch-progress" class="hidden rounded-lg border border-outline-variant/40 bg-surface-container-lowest p-3 flex flex-col gap-2 font-mono text-[11px] shadow-sm">
+          <div class="flex items-center justify-between gap-2">
+            <span class="flex items-center gap-2">
+              <span class="material-symbols-outlined text-[16px] text-badge-sdxl">auto_fix_high</span>
+              <span id="batch-state" class="font-semibold uppercase tracking-wider text-white">Batch running</span>
+            </span>
+            <span id="batch-count" class="text-outline">0 / 0</span>
+          </div>
+          <div class="h-1.5 w-full overflow-hidden rounded bg-surface-container-high">
+            <div id="batch-bar" class="h-full rounded bg-gradient-to-r from-badge-checkpoint to-badge-lora transition-all" style="width:0%"></div>
+          </div>
+          <div class="flex items-center justify-between gap-2">
+            <span id="batch-detail" class="truncate text-outline"></span>
+            <span class="flex shrink-0 items-center gap-1">
+              <button id="batch-cancel" class="sd-btn sd-btn-sm sd-btn-danger hidden" type="button">Cancel</button>
+              <button id="batch-dismiss" class="sd-btn sd-btn-sm hidden" type="button">Dismiss</button>
+            </span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -803,7 +824,8 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
       });
       const d = await parseApiJson(res, 'Batch request');
       if (d.ok) {
-        alert(`Batch job started for ${d.total} items. Output will be saved to ${dom.outDestDir.value}`);
+        batchDismissed = false;
+        startBatchPolling();
       } else {
         alert(d.error || 'Failed to start batch');
       }
@@ -825,9 +847,96 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
+  // ── Batch progress ──────────────────────────────────────────────────────────
+  // The batch runs in a backend thread, so navigating away and back only needs
+  // to re-read /rembg/api/batch/status. The core float shows the same state.
+  const batchUi = {
+    panel: document.getElementById('batch-progress'),
+    state: document.getElementById('batch-state'),
+    count: document.getElementById('batch-count'),
+    bar: document.getElementById('batch-bar'),
+    detail: document.getElementById('batch-detail'),
+    cancelBtn: document.getElementById('batch-cancel'),
+    dismissBtn: document.getElementById('batch-dismiss'),
+  };
+  let batchPollTimer = 0;
+  let batchDismissed = false;
+  const BATCH_LABELS = {
+    running: 'Batch running',
+    cancelled: 'Batch cancelled',
+    complete: 'Batch complete',
+    error: 'Batch failed',
+  };
+
+  function renderBatchProgress(s) {
+    const state = s.state || (s.running ? 'running' : 'idle');
+    if (state === 'idle' || (batchDismissed && !s.running)) {
+      batchUi.panel.classList.add('hidden');
+      return;
+    }
+    batchUi.panel.classList.remove('hidden');
+    const total = Number(s.total || 0);
+    const processed = Number(s.processed || 0);
+    const errors = Number(s.errors || 0);
+    const pct = total ? Math.round((processed / total) * 100) : 0;
+    batchUi.bar.style.width = `${s.running ? Math.max(4, pct) : s.state === 'error' ? 100 : pct}%`;
+    batchUi.bar.className = `h-full rounded bg-gradient-to-r ${
+      state === 'error'
+        ? 'from-status-alert to-status-warning'
+        : state === 'cancelled'
+          ? 'from-status-warning to-status-warning'
+          : 'from-badge-checkpoint to-badge-lora'
+    } transition-all`;
+    batchUi.state.textContent = BATCH_LABELS[state] || 'Batch';
+    batchUi.count.textContent = `${processed} / ${total}`;
+    const detail = [];
+    if (s.current_file) detail.push(`Processing ${s.current_file}`);
+    else if (state === 'complete') detail.push(`Saved ${processed} cutout${processed === 1 ? '' : 's'} to ${dom.outDestDir.value || 'the output folder'}`);
+    if (state === 'error' && s.message) detail.push(s.message);
+    if (errors) detail.push(`${errors} error${errors === 1 ? '' : 's'}`);
+    batchUi.detail.textContent = detail.join(' · ');
+    batchUi.cancelBtn.classList.toggle('hidden', !s.running);
+    batchUi.dismissBtn.classList.toggle('hidden', Boolean(s.running));
+  }
+
+  async function pollBatchStatus() {
+    batchPollTimer = 0;
+    try {
+      const res = await fetch('/rembg/api/batch/status', { cache: 'no-store' });
+      const d = await parseApiJson(res, 'Batch status');
+      if (!res.ok) throw new Error(d.error || `Batch status failed (HTTP ${res.status})`);
+      renderBatchProgress(d);
+      if (d.running) batchPollTimer = window.setTimeout(pollBatchStatus, 1500);
+    } catch (e) {
+      console.error(e);
+      batchPollTimer = window.setTimeout(pollBatchStatus, 5000);
+    }
+  }
+
+  function startBatchPolling() {
+    if (batchPollTimer) return;
+    void pollBatchStatus();
+  }
+
+  batchUi.cancelBtn.addEventListener('click', async () => {
+    batchUi.cancelBtn.disabled = true;
+    try {
+      await fetch('/rembg/api/batch/cancel', { method: 'POST' });
+    } catch (e) {
+      console.error(e);
+    } finally {
+      batchUi.cancelBtn.disabled = false;
+    }
+  });
+  batchUi.dismissBtn.addEventListener('click', () => {
+    batchDismissed = true;
+    batchUi.panel.classList.add('hidden');
+  });
+
   // Initialize
   loadStatus();
   renderBatchQueue();
+  startBatchPolling();
 })();
 </script>
 </body>

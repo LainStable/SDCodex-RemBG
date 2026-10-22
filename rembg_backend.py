@@ -51,11 +51,14 @@ _batch_lock = threading.Lock()
 _batch_cancel = threading.Event()
 _batch_status = {
     "running": False,
+    "state": "idle",
     "total": 0,
     "processed": 0,
     "errors": 0,
     "current_file": "",
     "items": [],
+    "started_at": 0,
+    "message": "",
 }
 
 
@@ -500,11 +503,14 @@ def start_batch():
         _batch_cancel.clear()
         _batch_status = {
             "running": True,
+            "state": "running",
             "total": len(items),
             "processed": 0,
             "errors": 0,
             "current_file": "",
             "items": [],
+            "started_at": time.time(),
+            "message": "",
         }
 
         def run_batch():
@@ -560,9 +566,14 @@ def start_batch():
             except Exception as e:
                 _batch_status["errors"] += max(0, len(items) - len(_batch_status["items"]))
                 _batch_status["items"].append({"file": "batch", "status": "error", "error": str(e)})
+                _batch_status["message"] = str(e)
+                _batch_status["state"] = "error"
             finally:
+                cancelled = _batch_cancel.is_set()
                 _batch_status["running"] = False
                 _batch_status["current_file"] = ""
+                if _batch_status["state"] == "running":
+                    _batch_status["state"] = "cancelled" if cancelled else "complete"
                 cleanup_staging()
 
         threading.Thread(target=run_batch, daemon=True).start()
@@ -571,7 +582,16 @@ def start_batch():
 
 @rembg_bp.get("/batch/status")
 def batch_status():
-    return jsonify(_batch_status)
+    """Batch state for the studio page and the core plugin-task float."""
+    payload = dict(_batch_status)
+    processed = payload.get("processed", 0)
+    total = payload.get("total", 0)
+    payload["active"] = bool(payload.get("running"))
+    payload["current"] = processed
+    payload["detail"] = payload.get("current_file") or ""
+    if not payload.get("message"):
+        payload["message"] = f"{processed} of {total} images" if total else ""
+    return jsonify(payload)
 
 
 @rembg_bp.post("/batch/cancel")

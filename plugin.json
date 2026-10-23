@@ -11,13 +11,7 @@
   "author": "LainStable",
   "repository": "https://github.com/LainStable/SDCodex-RemBG",
   "icon": "auto_fix_high",
-  "nav_items": [
-    {
-      "label": "RemBG Studio",
-      "icon": "auto_fix_high",
-      "page": "studio"
-    }
-  ],
+  "nav_items": [],
   "settings": [
     {
       "label": "RemBG",

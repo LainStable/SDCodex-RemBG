@@ -10,6 +10,7 @@ import shutil
 import tempfile
 import threading
 import time
+import uuid
 from urllib.parse import quote, unquote
 from flask import Blueprint, current_app, jsonify, request, send_file
 from werkzeug.exceptions import HTTPException
@@ -485,6 +486,81 @@ def list_queue():
     return jsonify({"items": items[:50], "total": len(items), "dir": in_dir})
 
 
+def get_staging_dir():
+    """Scratch space for files the browser uploads one at a time.
+
+    A batch used to arrive as one multipart request holding every file. A
+    proxy in front of the app (bot protection, body-size limit) rejects that
+    with a 403, so the browser now stages the files one request at a time and
+    the batch starts from the staged paths.
+    """
+    path = os.path.join(get_output_dir(), ".staging")
+    try:
+        os.makedirs(path, exist_ok=True)
+    except OSError:
+        path = os.path.join(tempfile.gettempdir(), "rembg-staging")
+        os.makedirs(path, exist_ok=True)
+    return os.path.abspath(path)
+
+
+def _clear_staging_dir(keep=()):
+    """Drop leftovers from an earlier batch (never the files in use)."""
+    keep = {os.path.realpath(p) for p in keep}
+    try:
+        for name in os.listdir(get_staging_dir()):
+            full = os.path.join(get_staging_dir(), name)
+            if os.path.realpath(full) in keep:
+                continue
+            try:
+                if os.path.isfile(full):
+                    os.remove(full)
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
+@rembg_bp.post("/batch/stage")
+def stage_batch_file():
+    """Accept one image for a later batch and return where it was staged."""
+    app = current_app._get_current_object()
+    name = ""
+    image_bytes = None
+
+    if "file" in request.files:
+        uploaded = request.files["file"]
+        name = secure_filename(uploaded.filename or "")
+        image_bytes = uploaded.read()
+    else:
+        data = request.get_json(silent=True) or {}
+        name = secure_filename(data.get("name") or "")
+        raw = data.get("image") or ""
+        if not raw:
+            return jsonify({"ok": False, "error": "no image was sent"}), 400
+        try:
+            if raw.startswith("data:"):
+                raw = raw.split(",", 1)[1] if "," in raw else raw
+            image_bytes = base64.b64decode(raw, validate=False)
+        except Exception:
+            return jsonify({"ok": False, "error": "image is not valid base64"}), 400
+
+    extension = os.path.splitext(name)[1].lower()
+    if extension not in IMAGE_EXTENSIONS:
+        return jsonify({"ok": False, "error": "unsupported image type"}), 400
+    if not image_bytes:
+        return jsonify({"ok": False, "error": "the image was empty"}), 400
+
+    safe_name = name or f"image{extension}"
+    staged_path = os.path.join(get_staging_dir(), f"{uuid.uuid4().hex}_{safe_name}")
+    try:
+        with open(staged_path, "wb") as handle:
+            handle.write(image_bytes)
+    except OSError as exc:
+        app.logger.warning("RemBG could not stage %s: %s", safe_name, exc)
+        return jsonify({"ok": False, "error": f"Could not stage the file: {exc}"}), 500
+    return jsonify({"ok": True, "path": staged_path, "name": safe_name})
+
+
 @rembg_bp.post("/batch")
 def start_batch():
     global _batch_status
@@ -506,9 +582,20 @@ def start_batch():
         items = data.get("items", [])
         if not isinstance(items, list):
             return jsonify({"ok": False, "error": "items must be a list"}), 400
-        if not uploaded_files and any(not isinstance(item, str) for item in items):
+        if not uploaded_files and any(
+            not isinstance(item, str) and not (isinstance(item, dict) and item.get("path"))
+            for item in items
+        ):
             return jsonify({"ok": False, "error": "items must contain image paths"}), 400
         staging_dir = None
+        staged_paths = []
+        if not uploaded_files:
+            staged_paths = [
+                item["path"] for item in items
+                if isinstance(item, dict) and item.get("path")
+            ]
+            # Anything left in the staging area belongs to an earlier job.
+            _clear_staging_dir(keep=staged_paths)
 
         def cleanup_staging():
             if not staging_dir:
@@ -588,12 +675,15 @@ def start_batch():
                         break
                     uploaded_name = item.get("name") if isinstance(item, dict) else None
                     item_path = item["path"] if isinstance(item, dict) else item
-                    source_root = staging_dir if isinstance(item, dict) else in_dir
+                    # Dict items are staged uploads: either this request's own
+                    # temp directory or the persistent staging area the browser
+                    # filled one file at a time.
+                    source_root = (staging_dir or get_staging_dir()) if isinstance(item, dict) else in_dir
                     source_root = os.path.realpath(source_root)
                     full_in = os.path.realpath(item_path if os.path.isabs(item_path) else os.path.join(source_root, item_path))
                     if os.path.commonpath((source_root, full_in)) != source_root:
                         _batch_status["errors"] += 1
-                        _batch_status["items"].append({"file": os.path.basename(str(item)), "status": "error", "error": "Path is outside input directory"})
+                        _batch_status["items"].append({"file": os.path.basename(str(item)), "status": "error", "error": "Path is outside the allowed directory"})
                         continue
                     fname = uploaded_name or os.path.basename(full_in)
                     _batch_status["current_file"] = fname
@@ -656,6 +746,14 @@ def start_batch():
                     else:
                         _batch_status["message"] = f"Saved {processed} cutout{'' if processed == 1 else 's'}"
                 cleanup_staging()
+                # The staged uploads were this job's own scratch space.
+                for path in staged_paths:
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+                if staged_paths:
+                    _clear_staging_dir()
 
         threading.Thread(target=run_batch, daemon=True).start()
         return jsonify({"ok": True, "total": len(items)})

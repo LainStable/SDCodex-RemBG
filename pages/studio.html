@@ -560,6 +560,15 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
     }
   }
 
+  function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error(`Could not read ${file.name}`));
+      reader.readAsDataURL(file);
+    });
+  }
+
   function updateModelSource() {
     const option = dom.selectModel.selectedOptions[0];
     const source = option?.dataset.source || 'https://github.com/danielgatis/rembg#available-models';
@@ -1079,9 +1088,7 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
     if (!confirmed) return;
     dom.btnCommitBatch.disabled = true;
     try {
-      const form = new FormData();
-      batchFiles.forEach(({ file }) => form.append('files', file, file.name));
-      form.append('options', JSON.stringify({
+      const options = {
         model: dom.selectModel.value,
         target_mode: currentTargetMode,
         bgcolor: dom.inputHex.value,
@@ -1090,20 +1097,47 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
         erosion: parseFloat(dom.rangeErosion.value),
         feather: parseFloat(dom.rangeFeather.value),
         despill: dom.chkDespill.checked,
-      }));
+      };
+
+      // Stage the files one request at a time. Uploading them all in a single
+      // multipart body is what a proxy in front of the app rejects with a
+      // 403 (one image per request is fine — that is what the single-image
+      // path does), so each file is sent on its own and the batch is started
+      // from the staged paths.
+      const items = [];
+      for (let index = 0; index < batchFiles.length; index++) {
+        const { file } = batchFiles[index];
+        dom.statReady.textContent = `Uploading ${index + 1} / ${batchFiles.length}…`;
+        dom.statReady.className = 'text-status-warning font-semibold';
+        const dataUrl = await readFileAsDataUrl(file);
+        const res = await fetch('/rembg/api/batch/stage', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: dataUrl, name: file.name }),
+        });
+        const staged = await parseApiJson(res, 'File upload');
+        if (!staged.ok) throw new Error(staged.error || `Could not upload ${file.name}`);
+        items.push({ path: staged.path, name: staged.name });
+      }
+
       const res = await fetch('/rembg/api/batch', {
         method: 'POST',
-        body: form,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items, options }),
       });
       const d = await parseApiJson(res, 'Batch request');
       if (d.ok) {
         batchDismissed = false;
+        dom.statReady.textContent = `Batch started · ${items.length} image${items.length === 1 ? '' : 's'}`;
+        dom.statReady.className = 'text-status-active font-semibold';
         startBatchPolling();
       } else {
         notify(d.error || 'Failed to start batch', true);
       }
     } catch(e) {
       notify('Error: ' + e.message, true);
+      dom.statReady.textContent = 'Error: ' + e.message;
+      dom.statReady.className = 'text-status-alert';
     } finally {
       dom.btnCommitBatch.disabled = false;
     }

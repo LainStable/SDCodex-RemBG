@@ -160,8 +160,8 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
             <img id="img-mask" class="max-h-full max-w-full object-contain pointer-events-none" src="" alt="Alpha Mask"/>
           </div>
 
-          <!-- Split View Divider Handle -->
-          <div id="divider-bar" class="hidden absolute top-0 bottom-0 left-[50%] w-0.5 bg-white shadow-[0_0_12px_rgba(255,255,255,0.8)] z-30 cursor-ew-resize flex items-center justify-center">
+          <!-- Split View Divider Handle — JS places it over the rendered picture -->
+          <div id="divider-bar" class="hidden absolute left-0 top-0 h-0 w-0.5 bg-white shadow-[0_0_12px_rgba(255,255,255,0.8)] z-30 cursor-ew-resize flex items-center justify-center">
             <div class="w-6 h-6 rounded-full bg-slate-surface border-2 border-white flex items-center justify-center shadow-xl text-white">
               <span class="material-symbols-outlined text-[13px]" style="transform: rotate(90deg);">unfold_more</span>
             </div>
@@ -401,6 +401,10 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
   let currentTargetMode = 'transparent';
   let isWiping = false;
   let wipePct = 50;
+  let dragState = null;
+  let zoom = 1;
+  let panX = 0;
+  let panY = 0;
 
   const dom = {
     telEngine: document.getElementById('tel-engine'),
@@ -564,7 +568,12 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
       dom.chipLeft.classList.remove('hidden');
       dom.chipRight.classList.remove('hidden');
 
-      setWipePosition(50);
+      // A new file resets the view — the wipe is measured against this one.
+      zoom = 1;
+      panX = 0;
+      panY = 0;
+      wipePct = 50;
+      syncCanvas();
       dom.statReady.textContent = 'Image Loaded · Ready to Process';
       dom.statReady.className = 'text-status-warning';
     };
@@ -627,10 +636,63 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
     }
   }
 
+  // ── Canvas geometry ────────────────────────────────────────────────────────
+  // The picture is letterboxed inside the stage (object-contain), so every
+  // canvas coordinate has to come from the rendered image box. Measuring
+  // against the stage put the handle and the cutout split off the picture:
+  // on any image narrower than the stage the wipe looked dead.
+  function pictureBox() {
+    for (const el of [dom.imgOrig, dom.imgCutout]) {
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width > 1 && r.height > 1) return r;
+    }
+    return dom.stage.getBoundingClientRect();
+  }
+
   function setWipePosition(pct) {
     wipePct = Math.max(0, Math.min(100, pct));
-    dom.divider.style.left = `${wipePct}%`;
-    dom.wipeContainer.style.clipPath = `polygon(0 0, ${wipePct}% 0, ${wipePct}% 100%, 0 100%)`;
+    const box = pictureBox();
+    const stage = dom.stage.getBoundingClientRect();
+    // The cutout image's own box IS the picture, so the clip lands on it.
+    // Both layers are clipped: the cutout shows on the left of the handle and
+    // the original on the right. Clipping only the cutout left the original
+    // underneath it, so the removed background was never actually visible.
+    dom.imgCutout.style.clipPath = `polygon(0 0, ${wipePct}% 0, ${wipePct}% 100%, 0 100%)`;
+    dom.imgOrig.style.clipPath = `polygon(${wipePct}% 0, 100% 0, 100% 100%, ${wipePct}% 100%)`;
+    // The handle rides the picture, not the stage.
+    const x = (box.left - stage.left) + (box.width * wipePct) / 100;
+    dom.divider.style.left = `${x}px`;
+    dom.divider.style.top = `${box.top - stage.top}px`;
+    dom.divider.style.height = `${box.height}px`;
+  }
+
+  function wipePctFromClientX(clientX) {
+    const box = pictureBox();
+    if (!box.width) return wipePct;
+    return ((clientX - box.left) / box.width) * 100;
+  }
+
+  // One shared transform keeps the original, cutout and mask layers aligned.
+  function syncCanvas() {
+    const transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+    [dom.layerOrig, dom.layerCutout, dom.layerMask].forEach((layer) => {
+      if (!layer) return;
+      layer.style.transform = transform;
+      layer.style.transformOrigin = 'center center';
+      layer.style.willChange = 'transform';
+    });
+    dom.zoomLevel.textContent = zoom === 1 ? 'FIT' : `${Math.round(zoom * 100)}%`;
+    setWipePosition(wipePct);
+  }
+
+  function setZoom(value) {
+    zoom = Math.max(1, Math.min(4, Math.round(value * 100) / 100));
+    if (zoom === 1) {
+      panX = 0;
+      panY = 0;
+    }
+    syncCanvas();
   }
 
   function setMode(mode) {
@@ -656,33 +718,64 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
     } else if (mode === 'alpha') {
       dom.modeAlpha.setAttribute('aria-pressed', 'true');
       dom.layerMask.classList.remove('hidden');
+      dom.imgCutout.style.clipPath = 'none';
+      dom.imgOrig.style.clipPath = 'none';
     } else if (mode === 'orig') {
       dom.modeOrig.setAttribute('aria-pressed', 'true');
       dom.layerOrig.classList.remove('hidden');
+      dom.imgCutout.style.clipPath = 'none';
+      dom.imgOrig.style.clipPath = 'none';
     } else if (mode === 'comp') {
       dom.modeComp.setAttribute('aria-pressed', 'true');
       dom.layerCutout.classList.remove('hidden');
-      dom.wipeContainer.style.clipPath = 'none';
+      dom.imgCutout.style.clipPath = 'none';
+      dom.imgOrig.style.clipPath = 'none';
     }
   }
 
-  // Divider dragging
-  dom.divider.addEventListener('mousedown', (e) => {
+  // Divider dragging — pointer events cover mouse, pen and touch alike.
+  dom.divider.addEventListener('pointerdown', (e) => {
     isWiping = true;
+    try { dom.divider.setPointerCapture(e.pointerId); } catch (_) {}
     e.preventDefault();
+    e.stopPropagation();
   });
 
-  window.addEventListener('mousemove', (e) => {
-    if (!isWiping) return;
-    const rect = dom.stage.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const pct = (x / rect.width) * 100;
-    setWipePosition(pct);
+  // Dragging on the picture pans it while zoomed in; a plain click jumps the
+  // wipe to that spot.
+  dom.stage.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('#divider-bar')) return;
+    dragState = { x: e.clientX, y: e.clientY, panX, panY, moved: false };
   });
 
-  window.addEventListener('mouseup', () => {
-    isWiping = false;
+  window.addEventListener('pointermove', (e) => {
+    if (isWiping) {
+      setWipePosition(wipePctFromClientX(e.clientX));
+      return;
+    }
+    if (!dragState) return;
+    const dx = e.clientX - dragState.x;
+    const dy = e.clientY - dragState.y;
+    if (!dragState.moved && Math.abs(dx) + Math.abs(dy) > 4) dragState.moved = true;
+    if (dragState.moved && zoom > 1) {
+      panX = dragState.panX + dx;
+      panY = dragState.panY + dy;
+      syncCanvas();
+    }
   });
+
+  window.addEventListener('pointerup', (e) => {
+    if (isWiping) isWiping = false;
+    if (dragState) {
+      if (!dragState.moved) setWipePosition(wipePctFromClientX(e.clientX));
+      dragState = null;
+    }
+  });
+
+  // Keep the wipe glued to the picture when the media or the viewport changes.
+  dom.imgOrig.addEventListener('load', syncCanvas);
+  dom.imgCutout.addEventListener('load', syncCanvas);
+  window.addEventListener('resize', syncCanvas);
 
   // Target Mode selection
   function setTargetMode(mode) {
@@ -785,6 +878,11 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
   dom.modeAlpha.addEventListener('click', () => setMode('alpha'));
   dom.modeOrig.addEventListener('click', () => setMode('orig'));
   dom.modeComp.addEventListener('click', () => setMode('comp'));
+
+  // Zoom (the picture scales about the stage centre; drag it to pan)
+  dom.btnZoomIn.addEventListener('click', () => setZoom(zoom + 0.25));
+  dom.btnZoomOut.addEventListener('click', () => setZoom(zoom - 0.25));
+  dom.btnZoomFit.addEventListener('click', () => setZoom(1));
 
   dom.targetTrans.addEventListener('click', () => setTargetMode('transparent'));
   dom.targetColor.addEventListener('click', () => setTargetMode('color'));

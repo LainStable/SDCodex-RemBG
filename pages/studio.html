@@ -596,9 +596,35 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
 
   const batchFiles = [];
 
+  function restoreQueueFromStatus(status) {
+    // The queue lives in the browser, so leaving the studio and coming back
+    // loses the tiles and their previews. The server still knows what the
+    // job is doing, so the finished images are rebuilt from its report.
+    const items = Array.isArray(status && status.items) ? status.items : [];
+    if (!items.length || batchFiles.length) return false;
+    const restored = [];
+    items.forEach((item) => {
+      if (!item || !item.file) return;
+      const output = item.output ? String(item.output).split('/').pop() : '';
+      restored.push({
+        file: { name: item.file },
+        previewUrl: item.source || '',
+        state: item.status === 'done' ? 'done' : item.status === 'error' ? 'failed' : 'processing',
+        cutoutUrl: item.url || (output ? `/rembg/api/file/${encodeURIComponent(output)}` : null),
+        error: item.error || null,
+        restored: true,
+      });
+    });
+    if (!restored.length) return false;
+    batchFiles.push(...restored);
+    renderBatchQueue();
+    return true;
+  }
+
   function loadCompareFromEntry(entry) {
     dom.dropPrompt.classList.add('hidden');
     dom.imgCutout.src = entry.cutoutUrl;
+    dom.imgOrig.onerror = () => dom.layerOrig.classList.add('hidden');
     dom.imgOrig.src = entry.previewUrl;
     dom.imgMask.src = '';
     currentCutoutUrl = entry.cutoutUrl;
@@ -659,8 +685,13 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
         </div>
       `;
       btn.addEventListener('click', () => {
-        if (entry.state === 'done') loadCompareFromEntry(entry);
-        else handleFileSelect(entry.file);
+        if (entry.state === 'done') {
+          loadCompareFromEntry(entry);
+        } else if (entry.restored) {
+          notify(`${entry.file.name} is not in this browser's queue any more.`, true);
+        } else {
+          handleFileSelect(entry.file);
+        }
       });
 
       const removeBtn = document.createElement('button');
@@ -1252,6 +1283,7 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
     }
 
     // Update queue entries from the batch status so tiles reflect done/failed.
+    restoreQueueFromStatus(s);
     let queueChanged = false;
     batchFiles.forEach((entry) => {
       if (entry.state === 'processing') {

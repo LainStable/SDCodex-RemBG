@@ -721,6 +721,10 @@ def start_batch():
                             "file": fname,
                             "status": "done",
                             "output": out_path,
+                            # The staged original, while the job still owns it:
+                            # a studio page re-opened mid-batch can show the
+                            # before/after wipe again.
+                            "source": f"/rembg/api/batch/staged/{quote(os.path.basename(full_in))}",
                             # A URL the studio can show straight away, so the
                             # batch results are visible instead of only on disk.
                             "url": f"/rembg/api/file/{quote(os.path.basename(out_path))}",
@@ -765,6 +769,20 @@ def start_batch():
 
         threading.Thread(target=run_batch, daemon=True).start()
         return jsonify({"ok": True, "total": len(items)})
+
+
+@rembg_bp.get("/batch/staged/<path:name>")
+def staged_batch_file(name):
+    """Serve a file the browser staged for the running batch."""
+    clean = os.path.basename(unquote(name or "").strip())
+    if not clean:
+        return "File not found", 404
+    root = os.path.realpath(get_staging_dir())
+    target = os.path.realpath(os.path.join(root, clean))
+    if os.path.commonpath((root, target)) != root or not os.path.isfile(target):
+        return "File not found", 404
+    mime, _ = mimetypes.guess_type(target)
+    return send_file(target, mimetype=mime or "application/octet-stream", conditional=True)
 
 
 @rembg_bp.get("/batch/status")

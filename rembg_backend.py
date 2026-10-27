@@ -50,6 +50,7 @@ _session_lock = threading.Lock()
 # Batch state
 _batch_lock = threading.Lock()
 _batch_cancel = threading.Event()
+_batch_pause = threading.Event()
 _batch_status = {
     "running": False,
     "state": "idle",
@@ -673,6 +674,13 @@ def start_batch():
                 for item in items:
                     if _batch_cancel.is_set():
                         break
+                    # A paused batch waits here until it is resumed or stopped.
+                    while _batch_pause.is_set() and not _batch_cancel.is_set():
+                        _batch_status["state"] = "paused"
+                        time.sleep(0.2)
+                    if _batch_cancel.is_set():
+                        break
+                    _batch_status["state"] = "running"
                     uploaded_name = item.get("name") if isinstance(item, dict) else None
                     item_path = item["path"] if isinstance(item, dict) else item
                     # Dict items are staged uploads: either this request's own
@@ -784,9 +792,25 @@ def batch_status():
     return jsonify(payload)
 
 
+@rembg_bp.post("/batch/pause")
+def pause_batch():
+    """Pause or resume a running batch (the task float's pause button)."""
+    with _batch_lock:
+        if not _batch_status["running"]:
+            return jsonify({"ok": True, "state": _batch_status["state"], "paused": False})
+        if _batch_pause.is_set():
+            _batch_pause.clear()
+            _batch_status["state"] = "running"
+            return jsonify({"ok": True, "state": "running", "paused": False})
+        _batch_pause.set()
+        _batch_status["state"] = "paused"
+        return jsonify({"ok": True, "state": "paused", "paused": True})
+
+
 @rembg_bp.post("/batch/cancel")
 def cancel_batch():
     _batch_cancel.set()
+    _batch_pause.clear()
     return jsonify({"ok": True})
 
 

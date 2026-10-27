@@ -1,12 +1,16 @@
 {
   "id": "rembg",
   "name": "rembg",
-  "version": "1.17.0",
+  "version": "1.18.0",
   "description": "High-precision neural background removal, alpha matting, and batch processing powered by BiRefNet & RemBG. Studio canvas has a working before/after split wipe and zoom.",
   "task_status": {
     "label": "RemBG",
     "path": "/rembg/api/batch/status",
-    "page": "studio"
+    "page": "studio",
+    "actions": {
+      "pause": "/rembg/api/batch/pause",
+      "stop": "/rembg/api/batch/cancel"
+    }
   },
   "author": "LainStable",
   "repository": "https://github.com/LainStable/SDCodex-RemBG",

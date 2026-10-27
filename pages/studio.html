@@ -702,6 +702,14 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
       dom.statReady.className = 'text-status-active font-semibold';
       dom.btnExportAlpha.disabled = false;
 
+      // The cutout could not be written to disk (a full output volume, say).
+      // The preview is still good, so keep it on screen and say what failed.
+      if (data.save_error) {
+        dom.statReady.textContent = 'Preview ready · not saved';
+        dom.statReady.className = 'text-status-alert font-semibold';
+        notify('Cutout ready, but saving to disk failed: ' + data.save_error, true);
+      }
+
       setMode('split');
     } catch(e) {
       notify('Error during background removal: ' + e.message, true);

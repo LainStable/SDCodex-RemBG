@@ -111,6 +111,40 @@ def get_model_cache_dir():
     return cache_dir
 
 
+def _free_bytes(path):
+    try:
+        return shutil.disk_usage(path).free
+    except OSError:
+        return 0
+
+
+def _is_out_of_space(exc):
+    text = str(exc).lower()
+    return "no space left" in text or "errno 28" in text
+
+
+def _fallback_cache_dir():
+    """A model cache on a volume that still has room.
+
+    The configured cache is normally a mounted data volume. When that volume
+    is full the model download dies with ENOSPC and the plugin looks broken,
+    so fall back to a local cache that can still be written.
+    """
+    for candidate in ("~/.u2net", "/tmp/u2net", "/var/tmp/u2net"):
+        path = os.path.abspath(os.path.expanduser(candidate))
+        try:
+            os.makedirs(path, exist_ok=True)
+            probe = os.path.join(path, ".write-probe")
+            with open(probe, "w", encoding="utf-8") as handle:
+                handle.write("ok")
+            os.remove(probe)
+        except OSError:
+            continue
+        if _free_bytes(path) > 64 * 1024 * 1024:
+            return path
+    return ""
+
+
 def get_model_session(model_name):
     """Retrieve or initialize a cached rembg model session."""
     name = (model_name or "birefnet-general").strip().lower()
@@ -137,6 +171,23 @@ def get_model_session(model_name):
             _session_errors.pop(target_name, None)
             return sess, target_name
         except Exception as exc:
+            # The model volume may simply be full. Retry once against a local
+            # cache so the plugin still works while the disk is being sorted.
+            fallback = _fallback_cache_dir() if _is_out_of_space(exc) else ""
+            if fallback:
+                try:
+                    os.environ["U2NET_HOME"] = fallback
+                    from rembg import new_session
+                    sess = new_session(target_name)
+                    _sessions[target_name] = sess
+                    _session_errors.pop(target_name, None)
+                    global _model_cache_warning
+                    _model_cache_warning = (
+                        f"Model cache moved to {fallback} — the configured volume is full"
+                    )
+                    return sess, target_name
+                except Exception as inner:
+                    exc = inner
             # Do not silently substitute another model: the caller needs to
             # report the model that actually ran (or that inference is unavailable).
             _session_errors[target_name] = f"{type(exc).__name__}: {exc}"
@@ -375,15 +426,23 @@ def process_image():
 
     t_ms = int((time.time() - t0) * 1000)
 
-    # Save to disk if requested
+    # Save to disk if requested. A full output volume must not take the
+    # preview down with it: the cutout is still returned, with the save
+    # failure reported next to it.
     saved_path = None
+    save_error = ""
     if save_output:
         out_dir = get_output_dir()
         stem = os.path.splitext(os.path.basename(orig_name))[0]
         ext = "png" if output_format in ("png", "mask") or target_mode == "transparent" else "webp"
         target_filename = f"{stem}_cutout_{int(time.time() * 1000)}.{ext}"
         saved_path = os.path.join(out_dir, target_filename)
-        final_img.save(saved_path)
+        try:
+            final_img.save(saved_path)
+        except OSError as exc:
+            save_error = f"{type(exc).__name__}: {exc}"
+            saved_path = None
+            current_app.logger.warning("RemBG could not save %s: %s", target_filename, save_error)
 
     # Return base64 preview representations
     preview_url = pil_to_base64(final_img, fmt=output_format)
@@ -401,6 +460,7 @@ def process_image():
         "original": orig_url,
         "saved_path": saved_path,
         "saved_filename": os.path.basename(saved_path) if saved_path else None,
+        "save_error": save_error,
     })
 
 

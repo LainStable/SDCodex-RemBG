@@ -573,7 +573,21 @@ def start_batch():
                 _batch_status["running"] = False
                 _batch_status["current_file"] = ""
                 if _batch_status["state"] == "running":
-                    _batch_status["state"] = "cancelled" if cancelled else "complete"
+                    processed = _batch_status["processed"]
+                    errors = _batch_status["errors"]
+                    total = len(items)
+                    if cancelled:
+                        _batch_status["state"] = "cancelled"
+                    elif errors and not processed:
+                        # Every image failed. Reporting "complete" here made a
+                        # dead batch look finished, so the state says it failed
+                        # and the per-item errors carry the reason.
+                        _batch_status["state"] = "error"
+                        _batch_status["message"] = f"All {errors} image{'' if errors == 1 else 's'} failed"
+                    elif errors:
+                        _batch_status["message"] = f"{errors} of {total} images failed"
+                    else:
+                        _batch_status["message"] = f"Saved {processed} cutout{'' if processed == 1 else 's'}"
                 cleanup_staging()
 
         threading.Thread(target=run_batch, daemon=True).start()
@@ -588,9 +602,20 @@ def batch_status():
     total = payload.get("total", 0)
     payload["active"] = bool(payload.get("running"))
     payload["current"] = processed
-    payload["detail"] = payload.get("current_file") or ""
+    # While running the detail is the file in flight; once it is over, name the
+    # first failure so the core's task float shows why nothing was saved.
+    detail = payload.get("current_file") or ""
+    if not detail:
+        for item in payload.get("items") or []:
+            if item.get("status") == "error":
+                detail = f"{item.get('file', 'image')}: {item.get('error', 'failed')}"
+                break
+    payload["detail"] = detail
     if not payload.get("message"):
-        payload["message"] = f"{processed} of {total} images" if total else ""
+        if payload.get("errors"):
+            payload["message"] = f"{payload.get('errors')} of {total} images failed"
+        else:
+            payload["message"] = f"{processed} of {total} images" if total else ""
     return jsonify(payload)
 
 

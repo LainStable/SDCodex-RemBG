@@ -38,6 +38,19 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
 }
 .gdl-page { max-width: 100%; overflow-x: clip; }
 .gdl-page [class*="col-span"] { min-width: 0; }
+
+/* In-page toast (replaces native alert) */
+.message { position: fixed; left: 50%; bottom: 24px; z-index: 70; max-width: min(480px, 90vw); transform: translateX(-50%); border: 1px solid rgba(70, 69, 84, 0.8); border-radius: 6px; background: rgba(24, 27, 37, 0.96); backdrop-filter: blur(16px); box-shadow: 0 8px 32px -4px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(99, 102, 241, 0.12); padding: 10px 14px; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px; line-height: 1.45; color: #dfe2ef; }
+.message[hidden] { display: none; }
+
+/* Promise-based confirm modal (replaces native confirm) */
+.confirm-modal { position: fixed; inset: 0; z-index: 60; display: none; align-items: center; justify-content: center; padding: 20px; background: rgba(5, 8, 13, 0.75); backdrop-filter: blur(4px); }
+.confirm-modal.open { display: flex; }
+.confirm-modal-box { display: flex; flex-direction: column; width: min(420px, 92vw); max-width: 420px; overflow: hidden; background: #181b25; border: 1px solid rgba(70, 69, 84, 0.7); border-radius: 8px; box-shadow: 0 24px 48px -12px rgba(0, 0, 0, 0.85); }
+.confirm-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; border-bottom: 1px solid rgba(70, 69, 84, 0.4); }
+.confirm-modal-head strong { font-family: Geist, Inter, sans-serif; font-size: 15px; font-weight: 700; color: #fff; }
+.confirm-modal-body { padding: 14px; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px; line-height: 1.5; color: #c7c4d7; }
+.confirm-modal-foot { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 10px 14px; border-top: 1px solid rgba(70, 69, 84, 0.4); background: rgba(10, 14, 23, 0.45); }
 </style>
 </head>
 <body class="bg-background text-on-surface antialiased min-h-screen font-body selection:bg-badge-checkpoint/30 selection:text-white">
@@ -145,19 +158,19 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
 
           <!-- Original Background Image Layer -->
           <div id="layer-original" class="hidden absolute inset-0 w-full h-full flex items-center justify-center p-2">
-            <img id="img-original" class="max-h-full max-w-full object-contain pointer-events-none" src="" alt="Original"/>
+            <img id="img-original" class="max-h-full max-w-full object-contain pointer-events-none" src="" alt="" aria-label="Original image"/>
           </div>
 
           <!-- Processed Cutout Foreground Layer with Split Wipe polygon clip -->
           <div id="layer-cutout" class="hidden absolute inset-0 w-full h-full flex items-center justify-center p-2 pointer-events-none">
             <div id="wipe-container" class="relative max-h-full max-w-full h-full w-full flex items-center justify-center overflow-hidden">
-              <img id="img-cutout" class="max-h-full max-w-full object-contain pointer-events-none drop-shadow-[0_10px_30px_rgba(99,102,241,0.35)]" src="" alt="Cutout"/>
+              <img id="img-cutout" class="max-h-full max-w-full object-contain pointer-events-none drop-shadow-[0_10px_30px_rgba(99,102,241,0.35)]" src="" alt="" aria-label="Processed cutout"/>
             </div>
           </div>
 
           <!-- Alpha Mask Layer (when in Alpha Matte mode) -->
           <div id="layer-mask" class="hidden absolute inset-0 w-full h-full flex items-center justify-center p-2 pointer-events-none">
-            <img id="img-mask" class="max-h-full max-w-full object-contain pointer-events-none" src="" alt="Alpha Mask"/>
+            <img id="img-mask" class="max-h-full max-w-full object-contain pointer-events-none" src="" alt="" aria-label="Alpha mask"/>
           </div>
 
           <!-- Split View Divider Handle — JS places it over the rendered picture -->
@@ -235,6 +248,7 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
               <button id="batch-dismiss" class="sd-btn sd-btn-sm hidden" type="button">Dismiss</button>
             </span>
           </div>
+          <div id="batch-errors" class="hidden max-h-28 overflow-y-auto scroll-thin border-t border-outline-variant/30 pt-2 flex flex-col gap-1.5"></div>
         </div>
       </div>
     </div>
@@ -391,6 +405,23 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
   </div>
 </div>
 
+<!-- In-page toast notification -->
+<div id="toast-message" class="message" role="status" hidden></div>
+
+<!-- Promise-based confirm modal -->
+<div id="confirm-modal" class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+  <div class="confirm-modal-box">
+    <div class="confirm-modal-head">
+      <strong id="confirm-title">Confirm</strong>
+    </div>
+    <div id="confirm-body" class="confirm-modal-body"></div>
+    <div class="confirm-modal-foot">
+      <button id="confirm-cancel" type="button" class="sd-btn">Cancel</button>
+      <button id="confirm-confirm" type="button" class="sd-btn sd-btn-primary">Confirm</button>
+    </div>
+  </div>
+</div>
+
 <script>
 (function() {
   let currentFile = null;
@@ -463,7 +494,53 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
     btnZoomOut: document.getElementById('btn-zoom-out'),
     btnZoomFit: document.getElementById('btn-zoom-fit'),
     zoomLevel: document.getElementById('zoom-level'),
+    toast: document.getElementById('toast-message'),
+    confirmModal: document.getElementById('confirm-modal'),
+    confirmTitle: document.getElementById('confirm-title'),
+    confirmBody: document.getElementById('confirm-body'),
+    confirmCancel: document.getElementById('confirm-cancel'),
+    confirmConfirm: document.getElementById('confirm-confirm'),
   };
+
+  // ── In-page notifications (replaces native alert) ──────────────────────────
+  let toastTimer = 0;
+  function notify(text, error = false) {
+    dom.toast.textContent = text;
+    dom.toast.style.color = error ? '#f87171' : '#dfe2ef';
+    dom.toast.style.borderColor = error ? 'rgba(239, 68, 68, 0.55)' : 'rgba(70, 69, 84, 0.8)';
+    dom.toast.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(() => { dom.toast.hidden = true; }, 5000);
+  }
+
+  // ── Promise-based confirm modal (replaces native confirm) ──────────────────
+  let confirmResolve = null;
+  function closeConfirm(result = false) {
+    if (confirmResolve) {
+      confirmResolve(result);
+      confirmResolve = null;
+    }
+    dom.confirmModal.classList.remove('open');
+  }
+  function confirmModal(title, body) {
+    if (confirmResolve) closeConfirm(false);
+    dom.confirmTitle.textContent = title;
+    dom.confirmBody.textContent = body;
+    dom.confirmModal.classList.add('open');
+    dom.confirmConfirm.focus();
+    return new Promise((resolve) => { confirmResolve = resolve; });
+  }
+  dom.confirmCancel.addEventListener('click', () => closeConfirm(false));
+  dom.confirmConfirm.addEventListener('click', () => closeConfirm(true));
+  dom.confirmModal.addEventListener('click', (e) => {
+    if (e.target === dom.confirmModal) closeConfirm(false);
+  });
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && dom.confirmModal.classList.contains('open')) {
+      e.preventDefault();
+      closeConfirm(false);
+    }
+  });
 
   async function parseApiJson(response, action) {
     const text = await response.text();
@@ -582,7 +659,7 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
 
   async function processActiveImage() {
     if (!currentOrigUrl) {
-      alert('Please select or upload an image first.');
+      notify('Please select or upload an image first.', true);
       return;
     }
 
@@ -627,7 +704,7 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
 
       setMode('split');
     } catch(e) {
-      alert('Error during background removal: ' + e.message);
+      notify('Error during background removal: ' + e.message, true);
       dom.statReady.textContent = 'Error: ' + e.message;
       dom.statReady.className = 'text-status-alert';
     } finally {
@@ -898,10 +975,14 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
   document.getElementById('btn-batch-modal').addEventListener('click', startBatchFromHeader);
   dom.btnCommitBatch.addEventListener('click', async () => {
     if (!batchFiles.length) {
-      alert('Add one or more images to the Batch Workspace Queue first.');
+      notify('Add one or more images to the Batch Workspace Queue first.', true);
       return;
     }
-    if (!confirm(`Start batch background removal on ${batchFiles.length} queued ${batchFiles.length === 1 ? 'image' : 'images'}?`)) return;
+    const confirmed = await confirmModal(
+      'Start batch background removal?',
+      `Process ${batchFiles.length} queued ${batchFiles.length === 1 ? 'image' : 'images'} and save the cutouts to ${dom.outDestDir.value || 'the output folder'}.`
+    );
+    if (!confirmed) return;
     dom.btnCommitBatch.disabled = true;
     try {
       const form = new FormData();
@@ -925,10 +1006,10 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
         batchDismissed = false;
         startBatchPolling();
       } else {
-        alert(d.error || 'Failed to start batch');
+        notify(d.error || 'Failed to start batch', true);
       }
     } catch(e) {
-      alert('Error: ' + e.message);
+      notify('Error: ' + e.message, true);
     } finally {
       dom.btnCommitBatch.disabled = false;
     }
@@ -954,6 +1035,7 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
     count: document.getElementById('batch-count'),
     bar: document.getElementById('batch-bar'),
     detail: document.getElementById('batch-detail'),
+    errors: document.getElementById('batch-errors'),
     cancelBtn: document.getElementById('batch-cancel'),
     dismissBtn: document.getElementById('batch-dismiss'),
   };
@@ -976,23 +1058,71 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
     const total = Number(s.total || 0);
     const processed = Number(s.processed || 0);
     const errors = Number(s.errors || 0);
+    const failedItems = Array.isArray(s.items)
+      ? s.items.filter((i) => i && i.status === 'error')
+      : [];
     const pct = total ? Math.round((processed / total) * 100) : 0;
-    batchUi.bar.style.width = `${s.running ? Math.max(4, pct) : s.state === 'error' ? 100 : pct}%`;
-    batchUi.bar.className = `h-full rounded bg-gradient-to-r ${
-      state === 'error'
-        ? 'from-status-alert to-status-warning'
-        : state === 'cancelled'
-          ? 'from-status-warning to-status-warning'
-          : 'from-badge-checkpoint to-badge-lora'
-    } transition-all`;
-    batchUi.state.textContent = BATCH_LABELS[state] || 'Batch';
+
+    let label = 'Batch';
+    let barColor = 'from-badge-checkpoint to-badge-lora';
+    let widthPct = 0;
+
+    if (s.running) {
+      label = 'Batch running';
+      widthPct = Math.max(4, pct);
+    } else if (state === 'cancelled') {
+      label = 'Batch cancelled';
+      barColor = 'from-status-warning to-status-warning';
+      widthPct = 100;
+    } else if (state === 'error' || (errors > 0 && processed === 0)) {
+      label = 'Batch failed';
+      barColor = 'from-status-alert to-status-alert';
+      widthPct = 100;
+    } else if (errors > 0) {
+      label = 'Batch completed with errors';
+      barColor = 'from-status-warning to-status-alert';
+      widthPct = 100;
+    } else {
+      label = 'Batch complete';
+      widthPct = 100;
+    }
+
+    batchUi.bar.style.width = `${widthPct}%`;
+    batchUi.bar.className = `h-full rounded bg-gradient-to-r ${barColor} transition-all`;
+    batchUi.state.textContent = label;
     batchUi.count.textContent = `${processed} / ${total}`;
+
+    const dest = dom.outDestDir.value || 'the output folder';
     const detail = [];
-    if (s.current_file) detail.push(`Processing ${s.current_file}`);
-    else if (state === 'complete') detail.push(`Saved ${processed} cutout${processed === 1 ? '' : 's'} to ${dom.outDestDir.value || 'the output folder'}`);
-    if (state === 'error' && s.message) detail.push(s.message);
-    if (errors) detail.push(`${errors} error${errors === 1 ? '' : 's'}`);
+    if (s.running && s.current_file) {
+      detail.push(`Processing ${s.current_file}`);
+    } else if (!s.running) {
+      if (errors === 0) {
+        detail.push(`Saved ${processed} cutout${processed === 1 ? '' : 's'} to ${dest}`);
+      } else if (processed === 0) {
+        detail.push(`No cutouts saved · ${errors} failed`);
+      } else {
+        detail.push(`Saved ${processed} of ${total} to ${dest} · ${errors} failed`);
+      }
+    }
     batchUi.detail.textContent = detail.join(' · ');
+
+    if (failedItems.length) {
+      batchUi.errors.classList.remove('hidden');
+      batchUi.errors.innerHTML = failedItems.map((i) => `
+        <div class="flex items-start gap-2 text-[10px]">
+          <span class="material-symbols-outlined text-[14px] text-status-alert shrink-0 mt-0.5" aria-hidden="true">error</span>
+          <div class="min-w-0 flex-1">
+            <div class="text-white truncate font-medium" title="${escapeHtml(i.file)}">${escapeHtml(i.file)}</div>
+            <div class="text-status-alert truncate" title="${escapeHtml(i.error)}">${escapeHtml(i.error)}</div>
+          </div>
+        </div>
+      `).join('');
+    } else {
+      batchUi.errors.classList.add('hidden');
+      batchUi.errors.innerHTML = '';
+    }
+
     batchUi.cancelBtn.classList.toggle('hidden', !s.running);
     batchUi.dismissBtn.classList.toggle('hidden', Boolean(s.running));
   }

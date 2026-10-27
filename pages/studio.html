@@ -256,7 +256,6 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
             </span>
           </div>
           <div id="batch-errors" class="hidden max-h-28 overflow-y-auto scroll-thin border-t border-outline-variant/30 pt-2 flex flex-col gap-1.5"></div>
-          <div id="batch-results" class="hidden max-h-28 overflow-y-auto scroll-thin border-t border-outline-variant/30 pt-2 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2"></div>
         </div>
       </div>
     </div>
@@ -508,7 +507,6 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
     confirmBody: document.getElementById('confirm-body'),
     confirmCancel: document.getElementById('confirm-cancel'),
     confirmConfirm: document.getElementById('confirm-confirm'),
-    batchResults: document.getElementById('batch-results'),
     canvasHint: document.getElementById('canvas-hint'),
   };
 
@@ -589,30 +587,92 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
 
   const batchFiles = [];
 
+  function loadCompareFromEntry(entry) {
+    dom.dropPrompt.classList.add('hidden');
+    dom.imgCutout.src = entry.cutoutUrl;
+    dom.imgOrig.src = entry.previewUrl;
+    dom.imgMask.src = '';
+    currentCutoutUrl = entry.cutoutUrl;
+    currentOrigUrl = entry.previewUrl;
+    currentMaskUrl = null;
+    currentFile = entry.file;
+
+    dom.layerOrig.classList.remove('hidden');
+    dom.layerCutout.classList.remove('hidden');
+    dom.layerMask.classList.add('hidden');
+    dom.divider.classList.remove('hidden');
+    dom.chipLeft.classList.remove('hidden');
+    dom.chipRight.classList.remove('hidden');
+
+    zoom = 1;
+    panX = 0;
+    panY = 0;
+    wipePct = 50;
+    setMode('split');
+    syncCanvas();
+    dom.statReady.textContent = `Completed · ${entry.file.name}`;
+    dom.statReady.className = 'text-status-active font-semibold';
+    updateCanvasHint();
+  }
+
   function renderBatchQueue() {
-    dom.queueStrip.querySelectorAll('.queue-item-card').forEach(el => el.remove());
+    dom.queueStrip.querySelectorAll('.queue-item-wrap').forEach(el => el.remove());
     batchFiles.forEach((entry, index) => {
-      const div = document.createElement('div');
-      div.className = 'queue-item-card group relative rounded-lg border border-outline-variant/40 bg-surface-container-lowest p-1.5 flex flex-col gap-1 cursor-pointer hover:border-badge-checkpoint transition-all';
-      div.innerHTML = `
+      const wrap = document.createElement('div');
+      wrap.className = 'queue-item-wrap group relative';
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'queue-item-card w-full rounded-lg border border-outline-variant/40 bg-surface-container-lowest p-1.5 flex flex-col gap-1 hover:border-badge-checkpoint transition-all text-left';
+
+      let mediaHtml = '';
+      let markerHtml = '';
+      if (entry.state === 'failed') {
+        mediaHtml = `<div class="h-full w-full flex items-center justify-center px-2 overflow-hidden"><span class="text-[10px] text-status-alert leading-tight text-center line-clamp-3 break-words">${escapeHtml(entry.error || 'Failed')}</span></div>`;
+        markerHtml = `<span class="absolute top-1 left-1 z-10 inline-flex items-center gap-0.5 px-1 py-0.5 rounded-[3px] text-[9px] font-semibold font-mono uppercase bg-status-alert/90 text-white" aria-label="Failed"><span class="material-symbols-outlined text-[10px]">error</span>Failed</span>`;
+      } else if (entry.state === 'done') {
+        mediaHtml = `<img src="${entry.cutoutUrl}" alt="" class="h-full w-full object-cover">`;
+        markerHtml = `<span class="absolute top-1 left-1 z-10 inline-flex items-center gap-0.5 px-1 py-0.5 rounded-[3px] text-[9px] font-semibold font-mono uppercase bg-status-active/90 text-black" aria-label="Completed"><span class="material-symbols-outlined text-[10px]">check</span>Done</span>`;
+      } else if (entry.state === 'processing') {
+        mediaHtml = `<img src="${entry.previewUrl}" alt="" class="h-full w-full object-cover opacity-80">`;
+        markerHtml = `<span class="absolute top-1 left-1 z-10 inline-flex items-center gap-0.5 px-1 py-0.5 rounded-[3px] text-[9px] font-semibold font-mono uppercase bg-badge-sdxl/90 text-black" aria-label="Processing"><span class="material-symbols-outlined text-[10px] animate-spin">progress_activity</span>...</span>`;
+      } else {
+        mediaHtml = `<img src="${entry.previewUrl}" alt="" class="h-full w-full object-cover">`;
+      }
+
+      btn.innerHTML = `
         <div class="h-16 w-full rounded overflow-hidden checkered-grid relative flex items-center justify-center">
-          <img src="${entry.previewUrl}" alt="" class="h-full w-full object-cover">
+          ${mediaHtml}
+          ${markerHtml}
         </div>
-        <div class="flex items-center gap-1 text-[10px] font-mono">
+        <div class="flex items-center gap-1 text-[10px] font-mono pr-5">
           <span class="text-white truncate" title="${escapeHtml(entry.file.name)}">${escapeHtml(entry.file.name)}</span>
-          <button type="button" class="queue-remove sd-btn sd-btn-icon ml-auto shrink-0 hover:text-status-alert" aria-label="Remove ${escapeHtml(entry.file.name)}" title="Remove from queue">×</button>
         </div>
       `;
-      div.addEventListener('click', () => handleFileSelect(entry.file));
-      div.querySelector('.queue-remove').addEventListener('click', (event) => {
+      btn.addEventListener('click', () => {
+        if (entry.state === 'done') loadCompareFromEntry(entry);
+        else handleFileSelect(entry.file);
+      });
+
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'queue-remove absolute top-1.5 right-1.5 z-10 w-5 h-5 flex items-center justify-center rounded bg-surface-container-high/80 text-outline hover:text-status-alert hover:bg-surface-container-highest transition-colors text-sm leading-none';
+      removeBtn.setAttribute('aria-label', `Remove ${escapeHtml(entry.file.name)}`);
+      removeBtn.title = 'Remove from queue';
+      removeBtn.textContent = '×';
+      removeBtn.addEventListener('click', (event) => {
         event.stopPropagation();
         URL.revokeObjectURL(entry.previewUrl);
         batchFiles.splice(index, 1);
         renderBatchQueue();
       });
-      dom.queueStrip.insertBefore(div, dom.btnQueueAdd);
+
+      wrap.appendChild(btn);
+      wrap.appendChild(removeBtn);
+      dom.queueStrip.insertBefore(wrap, dom.btnQueueAdd);
     });
-    dom.queueBadge.textContent = `${batchFiles.length} ${batchFiles.length === 1 ? 'Image' : 'Images'}`;
+    const doneCount = batchFiles.filter((e) => e.state === 'done').length;
+    dom.queueBadge.textContent = `${batchFiles.length} ${batchFiles.length === 1 ? 'Image' : 'Images'}` + (doneCount ? ` · ${doneCount} done` : '');
   }
 
   function addBatchFiles(files) {
@@ -626,7 +686,7 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
       const key = `${file.name}\0${file.size}\0${file.lastModified}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      batchFiles.push({ file, previewUrl: URL.createObjectURL(file) });
+      batchFiles.push({ file, previewUrl: URL.createObjectURL(file), state: 'queued', cutoutUrl: null, error: null });
     }
     renderBatchQueue();
     if (rejected) {
@@ -716,6 +776,15 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
       dom.statReady.textContent = 'Alpha Matte Extracted';
       dom.statReady.className = 'text-status-active font-semibold';
       dom.btnExportAlpha.disabled = false;
+
+      // Update the matching queue entry so the tile shows the completed cutout.
+      const queueMatch = batchFiles.find((entry) => entry.file === currentFile);
+      if (queueMatch) {
+        queueMatch.state = 'done';
+        queueMatch.cutoutUrl = data.image;
+        queueMatch.error = null;
+        renderBatchQueue();
+      }
 
       // The cutout could not be written to disk (a full output volume, say).
       // The preview is still good, so keep it on screen and say what failed.
@@ -1061,7 +1130,6 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
     bar: document.getElementById('batch-bar'),
     detail: document.getElementById('batch-detail'),
     errors: document.getElementById('batch-errors'),
-    results: document.getElementById('batch-results'),
     cancelBtn: document.getElementById('batch-cancel'),
     dismissBtn: document.getElementById('batch-dismiss'),
   };
@@ -1086,9 +1154,6 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
     const errors = Number(s.errors || 0);
     const failedItems = Array.isArray(s.items)
       ? s.items.filter((i) => i && i.status === 'error')
-      : [];
-    const doneItems = Array.isArray(s.items)
-      ? s.items.filter((i) => i && i.status === 'done' && i.output)
       : [];
     const pct = total ? Math.round((processed / total) * 100) : 0;
 
@@ -1152,24 +1217,40 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
       batchUi.errors.innerHTML = '';
     }
 
-    if (doneItems.length) {
-      batchUi.results.classList.remove('hidden');
-      batchUi.results.innerHTML = doneItems.map((i) => {
-        const basename = String(i.output).split('/').pop();
-        const encoded = encodeURIComponent(basename);
-        return `
-          <button type="button" class="batch-result-btn group flex flex-col gap-1 text-left rounded-lg border border-outline-variant/40 bg-surface-container-lowest p-1.5 hover:border-badge-checkpoint transition-all" data-file="${escapeHtml(i.file)}" data-output="${escapeHtml(i.output)}">
-            <div class="aspect-square rounded overflow-hidden checkered-grid flex items-center justify-center">
-              <img src="/rembg/api/file/${encoded}" alt="${escapeHtml(i.file)}" loading="lazy" class="w-full h-full object-cover">
-            </div>
-            <span class="text-[10px] text-white truncate font-mono" title="${escapeHtml(i.file)}">${escapeHtml(i.file)}</span>
-          </button>
-        `;
-      }).join('');
-    } else {
-      batchUi.results.classList.add('hidden');
-      batchUi.results.innerHTML = '';
+    // Update queue entries from the batch status so tiles reflect done/failed.
+    let queueChanged = false;
+    batchFiles.forEach((entry) => {
+      if (entry.state === 'processing') {
+        entry.state = 'queued';
+        queueChanged = true;
+      }
+    });
+    if (Array.isArray(s.items)) {
+      s.items.forEach((item) => {
+        if (!item || !item.file) return;
+        const match = batchFiles.find((entry) => entry.file.name === item.file || entry.file.name.toLowerCase() === item.file.toLowerCase());
+        if (!match) return;
+        if (item.status === 'done') {
+          const newUrl = item.url || (item.output ? `/rembg/api/file/${encodeURIComponent(String(item.output).split('/').pop())}` : null);
+          if (match.state !== 'done' || match.cutoutUrl !== newUrl) queueChanged = true;
+          match.state = 'done';
+          match.cutoutUrl = newUrl;
+          match.error = null;
+        } else if (item.status === 'error') {
+          if (match.state !== 'failed' || match.error !== item.error) queueChanged = true;
+          match.state = 'failed';
+          match.error = item.error || 'Unknown error';
+        }
+      });
     }
+    if (s.running && s.current_file) {
+      const current = batchFiles.find((entry) => entry.file.name === s.current_file || entry.file.name.toLowerCase() === s.current_file.toLowerCase());
+      if (current && current.state !== 'done' && current.state !== 'failed') {
+        current.state = 'processing';
+        queueChanged = true;
+      }
+    }
+    if (queueChanged) renderBatchQueue();
 
     batchUi.cancelBtn.classList.toggle('hidden', !s.running);
     batchUi.dismissBtn.classList.toggle('hidden', Boolean(s.running));
@@ -1207,48 +1288,6 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
   batchUi.dismissBtn.addEventListener('click', () => {
     batchDismissed = true;
     batchUi.panel.classList.add('hidden');
-  });
-
-  batchUi.results.addEventListener('click', (e) => {
-    const btn = e.target.closest('.batch-result-btn');
-    if (!btn) return;
-    const fileName = btn.dataset.file;
-    const outputPath = btn.dataset.output;
-    if (!fileName || !outputPath) return;
-
-    const basename = String(outputPath).split('/').pop();
-    const encoded = encodeURIComponent(basename);
-    const cutoutUrl = `/rembg/api/file/${encoded}`;
-
-    dom.dropPrompt.classList.add('hidden');
-    dom.imgCutout.src = cutoutUrl;
-    currentCutoutUrl = cutoutUrl;
-
-    const match = batchFiles.find((entry) => entry.file.name === fileName || entry.file.name.toLowerCase() === fileName.toLowerCase());
-    if (match) {
-      currentFile = match.file;
-      currentOrigUrl = match.previewUrl;
-      dom.imgOrig.src = match.previewUrl;
-      setMode('split');
-    } else {
-      currentFile = null;
-      currentOrigUrl = null;
-      dom.imgOrig.src = '';
-      dom.layerOrig.classList.add('hidden');
-      dom.layerMask.classList.add('hidden');
-      dom.layerCutout.classList.remove('hidden');
-      dom.divider.classList.add('hidden');
-      dom.chipLeft.classList.remove('hidden');
-      dom.chipRight.classList.add('hidden');
-      dom.imgCutout.style.clipPath = 'none';
-      dom.imgOrig.style.clipPath = 'none';
-      notify(`Showing ${fileName} — the original is no longer in the queue`, true);
-    }
-
-    dom.statReady.textContent = `Batch result · ${fileName}`;
-    dom.statReady.className = 'text-status-active font-semibold';
-    updateCanvasHint();
-    syncCanvas();
   });
 
   // Initialize

@@ -10,7 +10,7 @@ import shutil
 import tempfile
 import threading
 import time
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 from flask import Blueprint, current_app, jsonify, request, send_file
 from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
@@ -619,7 +619,14 @@ def start_batch():
                         res.save(out_path, format=out_ext.upper())
 
                         _batch_status["processed"] += 1
-                        _batch_status["items"].append({"file": fname, "status": "done", "output": out_path})
+                        _batch_status["items"].append({
+                            "file": fname,
+                            "status": "done",
+                            "output": out_path,
+                            # A URL the studio can show straight away, so the
+                            # batch results are visible instead of only on disk.
+                            "url": f"/rembg/api/file/{quote(os.path.basename(out_path))}",
+                        })
                     except Exception as e:
                         _batch_status["errors"] += 1
                         _batch_status["items"].append({"file": fname, "status": "error", "error": str(e)})

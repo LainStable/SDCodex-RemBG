@@ -188,6 +188,13 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
           <div id="chip-right" class="hidden absolute bottom-3 right-4 px-2 py-0.5 rounded bg-surface-container-lowest/80 backdrop-blur border border-outline-variant/40 font-mono text-[10px] text-outline flex items-center gap-1 z-20">
             <span>ORIGINAL RAW</span>
           </div>
+
+          <!-- Hint shown when an original is loaded but not yet processed -->
+          <div id="canvas-hint" class="hidden absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 pointer-events-none">
+            <div class="px-3 py-1.5 rounded-full bg-surface-container-lowest/90 backdrop-blur border border-outline-variant/40 font-mono text-[10px] text-outline shadow-lg">
+              Process the image to see the cutout
+            </div>
+          </div>
         </div>
 
         <!-- Canvas Bottom Telemetry Status Bar -->
@@ -249,6 +256,7 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
             </span>
           </div>
           <div id="batch-errors" class="hidden max-h-28 overflow-y-auto scroll-thin border-t border-outline-variant/30 pt-2 flex flex-col gap-1.5"></div>
+          <div id="batch-results" class="hidden max-h-28 overflow-y-auto scroll-thin border-t border-outline-variant/30 pt-2 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2"></div>
         </div>
       </div>
     </div>
@@ -500,6 +508,8 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
     confirmBody: document.getElementById('confirm-body'),
     confirmCancel: document.getElementById('confirm-cancel'),
     confirmConfirm: document.getElementById('confirm-confirm'),
+    batchResults: document.getElementById('batch-results'),
+    canvasHint: document.getElementById('canvas-hint'),
   };
 
   // ── In-page notifications (replaces native alert) ──────────────────────────
@@ -625,6 +635,10 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
     }
   }
 
+  function updateCanvasHint() {
+    dom.canvasHint.classList.toggle('hidden', !(currentOrigUrl && !currentCutoutUrl));
+  }
+
   function handleFileSelect(file) {
     if (!file) return;
     currentFile = file;
@@ -651,6 +665,7 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
       panY = 0;
       wipePct = 50;
       syncCanvas();
+      updateCanvasHint();
       dom.statReady.textContent = 'Image Loaded · Ready to Process';
       dom.statReady.className = 'text-status-warning';
     };
@@ -711,6 +726,7 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
       }
 
       setMode('split');
+      updateCanvasHint();
     } catch(e) {
       notify('Error during background removal: ' + e.message, true);
       dom.statReady.textContent = 'Error: ' + e.message;
@@ -816,6 +832,7 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
       dom.imgCutout.style.clipPath = 'none';
       dom.imgOrig.style.clipPath = 'none';
     }
+    updateCanvasHint();
   }
 
   // Divider dragging — pointer events cover mouse, pen and touch alike.
@@ -1044,6 +1061,7 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
     bar: document.getElementById('batch-bar'),
     detail: document.getElementById('batch-detail'),
     errors: document.getElementById('batch-errors'),
+    results: document.getElementById('batch-results'),
     cancelBtn: document.getElementById('batch-cancel'),
     dismissBtn: document.getElementById('batch-dismiss'),
   };
@@ -1068,6 +1086,9 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
     const errors = Number(s.errors || 0);
     const failedItems = Array.isArray(s.items)
       ? s.items.filter((i) => i && i.status === 'error')
+      : [];
+    const doneItems = Array.isArray(s.items)
+      ? s.items.filter((i) => i && i.status === 'done' && i.output)
       : [];
     const pct = total ? Math.round((processed / total) * 100) : 0;
 
@@ -1131,6 +1152,25 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
       batchUi.errors.innerHTML = '';
     }
 
+    if (doneItems.length) {
+      batchUi.results.classList.remove('hidden');
+      batchUi.results.innerHTML = doneItems.map((i) => {
+        const basename = String(i.output).split('/').pop();
+        const encoded = encodeURIComponent(basename);
+        return `
+          <button type="button" class="batch-result-btn group flex flex-col gap-1 text-left rounded-lg border border-outline-variant/40 bg-surface-container-lowest p-1.5 hover:border-badge-checkpoint transition-all" data-file="${escapeHtml(i.file)}" data-output="${escapeHtml(i.output)}">
+            <div class="aspect-square rounded overflow-hidden checkered-grid flex items-center justify-center">
+              <img src="/rembg/api/file/${encoded}" alt="${escapeHtml(i.file)}" loading="lazy" class="w-full h-full object-cover">
+            </div>
+            <span class="text-[10px] text-white truncate font-mono" title="${escapeHtml(i.file)}">${escapeHtml(i.file)}</span>
+          </button>
+        `;
+      }).join('');
+    } else {
+      batchUi.results.classList.add('hidden');
+      batchUi.results.innerHTML = '';
+    }
+
     batchUi.cancelBtn.classList.toggle('hidden', !s.running);
     batchUi.dismissBtn.classList.toggle('hidden', Boolean(s.running));
   }
@@ -1167,6 +1207,48 @@ tailwind.config = { darkMode: "class", theme: { extend: { colors: {
   batchUi.dismissBtn.addEventListener('click', () => {
     batchDismissed = true;
     batchUi.panel.classList.add('hidden');
+  });
+
+  batchUi.results.addEventListener('click', (e) => {
+    const btn = e.target.closest('.batch-result-btn');
+    if (!btn) return;
+    const fileName = btn.dataset.file;
+    const outputPath = btn.dataset.output;
+    if (!fileName || !outputPath) return;
+
+    const basename = String(outputPath).split('/').pop();
+    const encoded = encodeURIComponent(basename);
+    const cutoutUrl = `/rembg/api/file/${encoded}`;
+
+    dom.dropPrompt.classList.add('hidden');
+    dom.imgCutout.src = cutoutUrl;
+    currentCutoutUrl = cutoutUrl;
+
+    const match = batchFiles.find((entry) => entry.file.name === fileName || entry.file.name.toLowerCase() === fileName.toLowerCase());
+    if (match) {
+      currentFile = match.file;
+      currentOrigUrl = match.previewUrl;
+      dom.imgOrig.src = match.previewUrl;
+      setMode('split');
+    } else {
+      currentFile = null;
+      currentOrigUrl = null;
+      dom.imgOrig.src = '';
+      dom.layerOrig.classList.add('hidden');
+      dom.layerMask.classList.add('hidden');
+      dom.layerCutout.classList.remove('hidden');
+      dom.divider.classList.add('hidden');
+      dom.chipLeft.classList.remove('hidden');
+      dom.chipRight.classList.add('hidden');
+      dom.imgCutout.style.clipPath = 'none';
+      dom.imgOrig.style.clipPath = 'none';
+      notify(`Showing ${fileName} — the original is no longer in the queue`, true);
+    }
+
+    dom.statReady.textContent = `Batch result · ${fileName}`;
+    dom.statReady.className = 'text-status-active font-semibold';
+    updateCanvasHint();
+    syncCanvas();
   });
 
   // Initialize
